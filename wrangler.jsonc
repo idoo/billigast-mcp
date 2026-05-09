@@ -1,0 +1,8 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "billigast-mcp",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-05-07",
+  "workers_dev": true,
+  "observability": { "enabled": true }
+}
