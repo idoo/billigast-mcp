@@ -1,4 +1,4 @@
-// Shared shapes. Sources (src/sources/*) return ProductHit.
+// Shared shapes. Sources (src/sources/*) return ProductHit / ProductDetail.
 // All prices are SEK including VAT, as plain numbers.
 
 export type SourceId = "prisjakt";
@@ -31,6 +31,33 @@ export interface ProductHit {
   gtin: string[];
 }
 
+export interface Offer {
+  source: SourceId;
+  /** Store display name as the site shows it. */
+  store: string;
+  store_id: string | null;
+  /** Item price. */
+  price: number;
+  /** Shipping cost when the site reports it. */
+  shipping: number | null;
+  /** price + shipping when shipping is known, else null. */
+  total: number | null;
+  in_stock: boolean | null;
+  /** The site's stock/delivery text, e.g. "I lager", "1-3 dagar". */
+  stock_text: string | null;
+  condition: "new" | "used" | "refurbished" | null;
+  store_rating: Rating | null;
+  /** The store's own listing title when the site shows it (variant details). */
+  title: string | null;
+  /** Link for the user to click: the site's own shop link if given, else the product page. The server never fetches it. */
+  url: string;
+}
+
+export interface ProductDetail extends ProductHit {
+  /** Current offers, cheapest first. */
+  offers: Offer[];
+}
+
 export interface SearchOptions {
   /** 1-20 */
   limit: number;
@@ -43,7 +70,7 @@ export interface Source {
   /** "Prisjakt" */
   label: string;
   search(query: string, opts: SearchOptions): Promise<ProductHit[]>;
-  product(id: string): Promise<ProductHit>;
+  product(id: string): Promise<ProductDetail>;
   /** Product id from a product page URL on this site, else null. */
   parseUrl(url: string): string | null;
 }

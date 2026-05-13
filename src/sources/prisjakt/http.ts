@@ -1,5 +1,5 @@
-// HTTP access to prisjakt.nu's own frontend endpoints: the public GraphQL endpoint.
-// Never the shop redirects.
+// HTTP access to prisjakt.nu's own frontend endpoints: the public GraphQL endpoint and the
+// Next.js API routes the product page calls (offer list). Never the shop redirects.
 
 import { SourceError } from "../../types.js";
 
@@ -56,4 +56,8 @@ export async function graphql<T>(query: string, variables: Record<string, unknow
   }
   if (!body.data) fail("Prisjakt GraphQL returned no data");
   return body.data;
+}
+
+export function getJson(path: string): Promise<unknown> {
+  return request(path);
 }

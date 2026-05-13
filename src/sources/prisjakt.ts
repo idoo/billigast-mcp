@@ -1,9 +1,10 @@
 // Prisjakt (prisjakt.nu). Search: GraphQL searchV3 (the site's relevance ranking and price filter)
-// enriched with products(ids) for brand, image, rating and GTIN. Product: GraphQL product.
+// enriched with products(ids) for brand, image, rating and GTIN. Product: GraphQL product and the
+// offer list (GET /api/offer-list/{id}).
 
-import type { ProductHit, Rating, SearchOptions, Source } from "../types.js";
+import type { Offer, ProductDetail, ProductHit, Rating, SearchOptions, Source } from "../types.js";
 import { SourceError } from "../types.js";
-import { SITE, graphql } from "./prisjakt/http.js";
+import { SITE, getJson, graphql } from "./prisjakt/http.js";
 
 // ---- GraphQL ----
 
@@ -46,6 +47,35 @@ interface GqlProduct {
   variants?: { gtin14?: string | null }[] | null;
 }
 
+// ---- REST offer list ----
+
+interface Money {
+  amount?: number | null;
+}
+
+interface OfferRow {
+  shopId?: number;
+  clickoutUrl?: string | null;
+  price?: Money | null;
+  name?: string | null;
+  condition?: string | null;
+  stockStatus?: string | null;
+  shopUserReviews?: { score?: number | null; numberOfReviewsInScore?: number | null } | null;
+  shipping?: { cheapest?: { price?: Money | null; deliveryDays?: { min?: number; max?: number } | null } | null } | null;
+  shop?: { name?: string | null } | null;
+}
+
+const STOCK: Record<string, { in_stock: boolean | null; text: string }> = {
+  InStock: { in_stock: true, text: "I lager" },
+  LimitedStock: { in_stock: true, text: "Få i lager" },
+  OutOfStock: { in_stock: false, text: "Ej i lager" },
+  Incoming: { in_stock: false, text: "Inkommande" },
+  Preorder: { in_stock: false, text: "Förhandsbokning" },
+  PreOrder: { in_stock: false, text: "Förhandsbokning" },
+};
+
+const CONDITIONS: Record<string, Offer["condition"]> = { New: "new", Used: "used", Refurbished: "refurbished" };
+
 function rating(score: number | null | undefined, count: number | null | undefined): Rating | null {
   if (typeof score !== "number" || !count || count <= 0) return null;
   return { score: Math.round(score * 100) / 100, count, scale: 5 };
@@ -86,6 +116,37 @@ function toHit(product: GqlProduct, card?: Card): ProductHit {
   };
 }
 
+function toOffer(row: OfferRow, productUrl: string): Offer | null {
+  const price = row.price?.amount;
+  if (typeof price !== "number") return null;
+  const cheapest = row.shipping?.cheapest;
+  const shipping = typeof cheapest?.price?.amount === "number" ? cheapest.price.amount : null;
+  const stock = row.stockStatus ? STOCK[row.stockStatus] : undefined;
+  const days = cheapest?.deliveryDays;
+  const delivery =
+    days && typeof days.min === "number" && typeof days.max === "number"
+      ? days.min === days.max
+        ? `${days.min} dagar`
+        : `${days.min}-${days.max} dagar`
+      : null;
+  const stockText = [stock?.text, delivery].filter(Boolean).join(", ");
+  return {
+    source: "prisjakt",
+    store: row.shop?.name ?? "",
+    store_id: row.shopId === undefined ? null : String(row.shopId),
+    price,
+    shipping,
+    total: shipping === null ? null : price + shipping,
+    in_stock: stock?.in_stock ?? null,
+    stock_text: stockText || null,
+    condition: (row.condition && CONDITIONS[row.condition]) || null,
+    store_rating: rating(row.shopUserReviews?.score, row.shopUserReviews?.numberOfReviewsInScore),
+    title: row.name || null,
+    // The site's own shop link (/go-to-shop/...): handed to the user, never fetched here.
+    url: absolute(row.clickoutUrl, productUrl),
+  };
+}
+
 function productId(id: string): number {
   const n = Number(id);
   if (!/^\d+$/.test(id.trim()) || !Number.isSafeInteger(n) || n <= 0) throw new SourceError(`Not a Prisjakt product id: ${id}`, "prisjakt", 400);
@@ -118,10 +179,20 @@ export const prisjakt: Source = {
     return ranked.map((card) => toHit(byId.get(card.productId) ?? { id: card.productId, name: card.name ?? "" }, card));
   },
 
-  async product(id: string): Promise<ProductHit> {
-    const data = await graphql<{ product: GqlProduct | null }>(PRODUCT_QUERY, { id: productId(id) });
+  async product(id: string): Promise<ProductDetail> {
+    const pid = productId(id);
+    const [data, rows] = await Promise.all([
+      graphql<{ product: GqlProduct | null }>(PRODUCT_QUERY, { id: pid }),
+      getJson(`/api/offer-list/${pid}`) as Promise<OfferRow[]>,
+    ]);
     if (!data.product) throw new SourceError("Not found on Prisjakt", "prisjakt", 404);
-    return toHit(data.product);
+    const hit = toHit(data.product);
+    const offers = (Array.isArray(rows) ? rows : [])
+      .map((row) => toOffer(row, hit.url))
+      .filter((offer): offer is Offer => offer !== null)
+      .sort((a, b) => (a.total ?? a.price) - (b.total ?? b.price) || a.price - b.price);
+    const stores = new Set(offers.map((offer) => offer.store_id ?? offer.store)).size;
+    return { ...hit, offer_count: stores || hit.offer_count, offers };
   },
 
   parseUrl(url: string): string | null {
