@@ -1,9 +1,10 @@
 // Prisjakt (prisjakt.nu). Search: GraphQL searchV3 (the site's relevance ranking and price filter)
-// enriched with products(ids) for brand, image, rating and GTIN. Product: GraphQL product and the
-// offer list (GET /api/offer-list/{id}).
+// enriched with products(ids) for brand, image, rating and GTIN. Product: GraphQL product, the
+// offer list (GET /api/offer-list/{id}) and price history (POST /api/price-history).
 
 import type { Offer, ProductDetail, ProductHit, Rating, SearchOptions, Source } from "../types.js";
 import { SourceError } from "../types.js";
+import { priceHistory } from "./prisjakt/history.js";
 import { SITE, getJson, graphql } from "./prisjakt/http.js";
 
 // ---- GraphQL ----
@@ -181,9 +182,10 @@ export const prisjakt: Source = {
 
   async product(id: string): Promise<ProductDetail> {
     const pid = productId(id);
-    const [data, rows] = await Promise.all([
+    const [data, rows, history] = await Promise.all([
       graphql<{ product: GqlProduct | null }>(PRODUCT_QUERY, { id: pid }),
       getJson(`/api/offer-list/${pid}`) as Promise<OfferRow[]>,
+      priceHistory(pid),
     ]);
     if (!data.product) throw new SourceError("Not found on Prisjakt", "prisjakt", 404);
     const hit = toHit(data.product);
@@ -192,7 +194,7 @@ export const prisjakt: Source = {
       .filter((offer): offer is Offer => offer !== null)
       .sort((a, b) => (a.total ?? a.price) - (b.total ?? b.price) || a.price - b.price);
     const stores = new Set(offers.map((offer) => offer.store_id ?? offer.store)).size;
-    return { ...hit, offer_count: stores || hit.offer_count, offers };
+    return { ...hit, offer_count: stores || hit.offer_count, offers, history };
   },
 
   parseUrl(url: string): string | null {

@@ -53,9 +53,26 @@ export interface Offer {
   url: string;
 }
 
+export interface PricePoint {
+  /** YYYY-MM-DD */
+  date: string;
+  price: number;
+}
+
+export interface PriceHistory {
+  source: SourceId;
+  lowest_30d: number | null;
+  lowest_90d: number | null;
+  lowest_ever: PricePoint | null;
+  /** Daily lowest price, oldest first, at most 60 points (downsampled). */
+  points: PricePoint[];
+}
+
 export interface ProductDetail extends ProductHit {
   /** Current offers, cheapest first. */
   offers: Offer[];
+  /** null when the site has none or doesn't allow fetching it. */
+  history: PriceHistory | null;
 }
 
 export interface SearchOptions {
