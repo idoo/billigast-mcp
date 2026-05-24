@@ -1,7 +1,7 @@
 // Shared shapes. Sources (src/sources/*) return ProductHit / ProductDetail.
 // All prices are SEK including VAT, as plain numbers.
 
-export type SourceId = "prisjakt";
+export type SourceId = "prisjakt" | "pricerunner";
 
 export interface Rating {
   score: number;
@@ -84,7 +84,7 @@ export interface SearchOptions {
 
 export interface Source {
   id: SourceId;
-  /** "Prisjakt" */
+  /** "Prisjakt" / "PriceRunner" */
   label: string;
   search(query: string, opts: SearchOptions): Promise<ProductHit[]>;
   product(id: string): Promise<ProductDetail>;
