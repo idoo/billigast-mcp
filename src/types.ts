@@ -1,4 +1,5 @@
-// Shared shapes. Sources (src/sources/*) return ProductHit / ProductDetail.
+// Shared shapes. Sources (src/sources/*) return ProductHit / ProductDetail; src/merge.ts ties
+// the two sites' listings together.
 // All prices are SEK including VAT, as plain numbers.
 
 export type SourceId = "prisjakt" | "pricerunner";
@@ -101,4 +102,46 @@ export class SourceError extends Error {
     super(message);
     this.name = "SourceError";
   }
+}
+
+// ---- Merged across sites ----
+
+export interface SourceListing {
+  id: string;
+  url: string;
+  lowest_price: number | null;
+  offer_count: number | null;
+}
+
+export type MatchKind = "gtin" | "name" | null;
+
+export interface MergedProduct {
+  /** Pass to compare: "prisjakt:123", "pricerunner:456" or "prisjakt:123+pricerunner:456". */
+  key: string;
+  name: string;
+  brand: string | null;
+  category: string | null;
+  image: string | null;
+  rating: Rating | null;
+  gtin: string[];
+  sources: Partial<Record<SourceId, SourceListing>>;
+  /** How the two sites' listings were tied together; null when only one site has it. */
+  match: MatchKind;
+  cheapest: { price: number; source: SourceId } | null;
+}
+
+export interface MergedOffer {
+  store: string;
+  /** Lowest price among the sites listing this store. */
+  price: number;
+  shipping: number | null;
+  total: number | null;
+  in_stock: boolean | null;
+  stock_text: string | null;
+  condition: "new" | "used" | "refurbished" | null;
+  store_rating: Rating | null;
+  title: string | null;
+  url: string;
+  /** Sites that list this store's offer, with the price each shows. */
+  seen_on: Partial<Record<SourceId, number>>;
 }
