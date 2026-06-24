@@ -105,6 +105,18 @@ function normalize(name: string): string {
   return s;
 }
 
+/**
+ * Whether a listing's name contains any word of the query (folded the same way as for matching).
+ * PriceRunner answers a query it can't match with unrelated popular products; this drops them.
+ */
+export function mentionsQuery(query: string, name: string): boolean {
+  const haystack = normalize(name).replace(/[^a-z0-9.]+/g, " ");
+  return normalize(query)
+    .split(/[^a-z0-9.]+/)
+    .filter((word) => word.length > 1 || /\d/.test(word))
+    .some((word) => haystack.includes(word));
+}
+
 function features(hit: ProductHit): Features {
   const tokens = normalize(hit.name)
     .split(/[^a-z0-9.]+/)

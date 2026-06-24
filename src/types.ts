@@ -1,5 +1,5 @@
-// Shared shapes. Sources (src/sources/*) return ProductHit / ProductDetail; src/merge.ts ties
-// the two sites' listings together.
+// Shared shapes. Sources (src/sources/*) return ProductHit / ProductDetail; tools (src/tools.ts)
+// merge them into SearchResult, returned as structuredContent.
 // All prices are SEK including VAT, as plain numbers.
 
 export type SourceId = "prisjakt" | "pricerunner";
@@ -104,7 +104,7 @@ export class SourceError extends Error {
   }
 }
 
-// ---- Merged across sites ----
+// ---- Tool results (structuredContent) ----
 
 export interface SourceListing {
   id: string;
@@ -128,6 +128,18 @@ export interface MergedProduct {
   /** How the two sites' listings were tied together; null when only one site has it. */
   match: MatchKind;
   cheapest: { price: number; source: SourceId } | null;
+}
+
+export interface SourceFailure {
+  source: SourceId;
+  message: string;
+}
+
+export interface SearchResult {
+  query: string;
+  products: MergedProduct[];
+  /** Sites that failed; results from the others are still returned. */
+  errors: SourceFailure[];
 }
 
 export interface MergedOffer {
