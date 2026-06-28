@@ -1,7 +1,7 @@
 // Cross-site merging: ties a Prisjakt listing to its PriceRunner counterpart (matchProducts), merges
-// search lists (mergeHits) and store offers (mergeOffers), and builds product keys.
+// search lists (mergeHits) and store offers (mergeOffers), and builds the keys compare takes.
 
-import type { MatchKind, MergedOffer, MergedProduct, Offer, ProductHit, SourceId, SourceListing } from "./types.js";
+import type { MatchKind, MergedOffer, MergedProduct, Offer, PriceHistory, ProductHit, SourceId, SourceListing } from "./types.js";
 
 export const SOURCE_IDS: readonly SourceId[] = ["prisjakt", "pricerunner"];
 
@@ -350,4 +350,40 @@ export function mergeOffers(offers: Offer[]): MergedOffer[] {
     });
   }
   return merged.sort((a, b) => cost(a) - cost(b) || a.price - b.price);
+}
+
+/** Lowest new price of one site's offers. */
+export function lowestNewPrice(offers: Offer[]): number | null {
+  const prices = offers.filter(isNew).map((offer) => offer.price);
+  return prices.length ? Math.min(...prices) : null;
+}
+
+export const isNew = (offer: { condition: Offer["condition"] }) => offer.condition === "new" || offer.condition === null;
+
+// ---- Verdict ----
+
+function kr(amount: number): string {
+  return `${Math.round(amount)
+    .toString()
+    .replace(/\B(?=(\d{3})+(?!\d))/g, " ")} kr`;
+}
+
+/**
+ * One sentence on today's lowest new price against the price history, or null without one.
+ * Compares whole kronor; the 90-day low leads because old all-time lows can be bogus (e.g. a reused product id).
+ */
+export function verdict(price: number | null, history: PriceHistory | null): string | null {
+  if (price === null || !history) return null;
+  const now = Math.round(price);
+  const ever = history.lowest_ever;
+  if (ever && now < Math.round(ever.price)) return `${kr(now)} today is below the lowest price recorded before (${kr(ever.price)} on ${ever.date}).`;
+  if (ever && now === Math.round(ever.price)) return `${kr(now)} today matches the lowest price ever recorded (${ever.date}).`;
+  const low = history.lowest_90d ?? null;
+  const base = low ?? ever?.price ?? null;
+  if (base === null) return null;
+  if (low !== null && now <= Math.round(low)) return `${kr(now)} today is the lowest in 90 days.`;
+  const since = new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10);
+  const day = low === null ? ever?.date : history.points.filter((point) => point.date >= since && point.price === low).at(-1)?.date;
+  const above = Math.max(1, Math.round(((now - base) / base) * 100));
+  return `${kr(now)} today is ${above}% above the ${low === null ? "lowest price ever" : "90-day low"} of ${kr(base)}${day ? ` on ${day}` : ""}.`;
 }

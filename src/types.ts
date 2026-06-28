@@ -1,5 +1,5 @@
 // Shared shapes. Sources (src/sources/*) return ProductHit / ProductDetail; tools (src/tools.ts)
-// merge them into SearchResult, returned as structuredContent.
+// merge them into SearchResult / CompareResult, returned as structuredContent.
 // All prices are SEK including VAT, as plain numbers.
 
 export type SourceId = "prisjakt" | "pricerunner";
@@ -156,4 +156,19 @@ export interface MergedOffer {
   url: string;
   /** Sites that list this store's offer, with the price each shows. */
   seen_on: Partial<Record<SourceId, number>>;
+}
+
+export interface CompareResult {
+  product: MergedProduct;
+  /** One row per store and condition, cheapest first (by total when known, else price). New only unless include_used. */
+  offers: MergedOffer[];
+  /** Cheapest new offer (condition "new" or unknown). */
+  cheapest: MergedOffer | null;
+  cheapest_in_stock: MergedOffer | null;
+  /** Cheapest used or refurbished offer, reported even when include_used is false. */
+  cheapest_secondhand: MergedOffer | null;
+  history: PriceHistory | null;
+  /** One sentence on where today's lowest price sits against the history, when there is one. */
+  verdict: string | null;
+  errors: SourceFailure[];
 }

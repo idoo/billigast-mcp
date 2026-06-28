@@ -1,13 +1,14 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { mentionsQuery, mergeHits, SOURCE_IDS } from "./merge.js";
+import { isNew, lowestNewPrice, matchProducts, mentionsQuery, mergedProduct, mergeHits, mergeOffers, parseKey, SOURCE_IDS, verdict } from "./merge.js";
 import { pricerunner } from "./sources/pricerunner.js";
 import { prisjakt } from "./sources/prisjakt.js";
-import type { ProductHit, SearchOptions, SearchResult, Source, SourceFailure, SourceId } from "./types.js";
+import type { CompareResult, MatchKind, MergedOffer, ProductDetail, ProductHit, SearchOptions, SearchResult, Source, SourceFailure, SourceId } from "./types.js";
 
-export const INSTRUCTIONS = `Finds a product cheaper by checking Prisjakt and PriceRunner, Sweden's two price comparison sites, at once. Prices are SEK incl. VAT. Links go to the comparison sites' product pages. Read-only.
+export const INSTRUCTIONS = `Finds a product cheaper by checking Prisjakt and PriceRunner, Sweden's two price comparison sites, at once. Flow: search → compare with a product's key for every store's price. Prices are SEK incl. VAT; shipping only where the site reports it. The same store listed on both sites is merged into one row. Prisjakt adds price history. Links go via the comparison sites. Read-only.
 search merges both sites' hits into one product when they are the same model (GTIN or model, capacity, size and variant words agree; colours may be merged when one site lists none); sources shows each site's own price and offer count, cheapest the lower one. Variants such as 128 vs 256 GB or Pro vs non-Pro stay separate products.
-Keep at most 3 calls in parallel.`;
+compare returns new offers only unless include_used (cheapest_secondhand is reported regardless), cheapest_in_stock is reported in stock. Also the price history and a verdict against the 90-day and all-time lows; errors lists a site that failed while the other still answered.
+Always give the user each offer's url. Keep at most 3 calls in parallel.`;
 
 const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true };
 
@@ -46,13 +47,76 @@ async function search(query: string, opts: SearchOptions, sources: readonly Sour
   if (errors.length === sources.length) throw new Error(errors.map((e) => `${SOURCES[e.source].label}: ${e.message}`).join("; "));
   return { query, products: mergeHits(lists).slice(0, opts.limit), errors };
 }
+
+interface CompareArgs {
+  product: string;
+  in_stock_only: boolean;
+  include_used: boolean;
+  limit: number;
+}
+
+async function fetchDetails(ids: Partial<Record<SourceId, string>>, errors: SourceFailure[]): Promise<Partial<Record<SourceId, ProductDetail>>> {
+  const wanted = SOURCE_IDS.filter((source) => ids[source]);
+  const settled = await Promise.allSettled(wanted.map((source) => SOURCES[source].product(ids[source] as string)));
+  const details: Partial<Record<SourceId, ProductDetail>> = {};
+  settled.forEach((outcome, i) => {
+    if (outcome.status === "fulfilled") details[wanted[i]] = outcome.value;
+    else errors.push({ source: wanted[i], message: message(outcome.reason) });
+  });
+  return details;
+}
+
+async function compare(args: CompareArgs): Promise<CompareResult> {
+  const ids = parseKey(args.product);
+  if (!ids) throw new Error(`Not a compare key: ${args.product}. Use a key from search, e.g. prisjakt:123+pricerunner:456.`);
+  const errors: SourceFailure[] = [];
+  const details = await fetchDetails(ids, errors);
+  const found = SOURCE_IDS.filter((source) => details[source]);
+  if (found.length === 0) throw new Error(errors.map((e) => `${SOURCES[e.source].label}: ${e.message}`).join("; "));
+
+  const listed = SOURCE_IDS.map((source) => details[source]).filter((detail): detail is ProductDetail => detail !== undefined);
+  const match: MatchKind = listed.length > 1 ? (matchProducts(listed[0], listed[1]) ?? "name") : null;
+  const product = mergedProduct(listed, match);
+  for (const detail of listed) {
+    const lowest = lowestNewPrice(detail.offers);
+    const listing = product.sources[detail.source];
+    if (listing && lowest !== null) listing.lowest_price = lowest;
+  }
+
+  const all = mergeOffers(listed.flatMap((detail) => detail.offers));
+  const fresh = all.filter(isNew);
+  const cheapest = fresh[0] ?? null;
+  const cheapest_in_stock = fresh.find((offer) => offer.in_stock === true) ?? null;
+  const cheapest_secondhand = all.find((offer) => !isNew(offer)) ?? null;
+  if (cheapest) {
+    const [source, price] = (Object.entries(cheapest.seen_on) as [SourceId, number][]).reduce((a, b) => (b[1] < a[1] ? b : a));
+    product.cheapest = { price, source };
+  }
+
+  const offers: MergedOffer[] = all
+    .filter((offer) => args.include_used || isNew(offer))
+    .filter((offer) => !args.in_stock_only || offer.in_stock === true)
+    .slice(0, args.limit);
+  const history = details.prisjakt?.history ?? details.pricerunner?.history ?? null;
+  return {
+    product,
+    offers,
+    cheapest,
+    cheapest_in_stock,
+    cheapest_secondhand,
+    history,
+    verdict: verdict(cheapest?.price ?? null, history),
+    errors,
+  };
+}
+
 export function registerTools(server: McpServer) {
   server.registerTool(
     "search",
     {
       title: "Search Prisjakt and PriceRunner",
       description:
-        "Search Prisjakt and PriceRunner at once. Returns products with both sites' listings merged when they are the same model: key, name, brand, category, image, rating, each site's lowest price, offer count and url (sources), how the sites were tied (match: gtin/name, null for one site) and the cheapest site. errors lists a site that failed; the other's results still come back.",
+        "Search Prisjakt and PriceRunner at once. Returns products with both sites' listings merged when they are the same model: key (pass to compare), name, brand, category, image, rating, each site's lowest price, offer count and url (sources), how the sites were tied (match: gtin/name, null for one site) and the cheapest site. errors lists a site that failed; the other's results still come back.",
       inputSchema: {
         query: z.string().trim().min(1).max(200).describe("Product to look for, e.g. 'airpods pro 2', 'iphone 16 128gb', 'samsung qe55q80d'. Model names and numbers work best."),
         min_price: z.number().min(0).optional().describe("Lowest price, SEK incl. VAT."),
@@ -68,5 +132,32 @@ export function registerTools(server: McpServer) {
     },
     ({ query, min_price, max_price, limit, sources }) =>
       result(() => search(query, { limit, min_price, max_price }, sources ? SOURCE_IDS.filter((s) => sources.includes(s)) : SOURCE_IDS)),
+  );
+
+  server.registerTool(
+    "compare",
+    {
+      title: "Compare store prices",
+      description:
+        "Every store's price for one product across Prisjakt and PriceRunner, cheapest first by total (price + shipping) when shipping is known, else price. The same store on both sites is one row with both prices in seen_on. Also cheapest (new), cheapest_secondhand (used/refurbished), cheapest_in_stock (new, reported in stock), Prisjakt's price history (lowest new price per day; 30/90-day and all-time lows) and a verdict on the cheapest price.",
+      inputSchema: {
+        product: z
+          .string()
+          .trim()
+          .min(1)
+          .max(500)
+          .describe(
+            "A key from search, e.g. 'prisjakt:123+pricerunner:456' or 'pricerunner:456'.",
+          ),
+        in_stock_only: z.boolean().default(false).describe("List only offers the site reports in stock. Default false."),
+        include_used: z
+          .boolean()
+          .default(false)
+          .describe("Also list used and refurbished offers. Default false: new only (unknown condition counts as new). cheapest_secondhand is reported either way."),
+        limit: z.number().int().min(1).max(50).default(20).describe("Offers to list, 1-50, default 20."),
+      },
+      annotations: { title: "Compare store prices", ...READ_ONLY },
+    },
+    (args) => result(() => compare(args)),
   );
 }
