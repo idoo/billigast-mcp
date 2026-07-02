@@ -17,6 +17,12 @@ export default {
     if (request.method !== "POST") {
       return new Response("Method not allowed", { status: 405, headers: { allow: "POST" } });
     }
+    if (!(await env.LIMITER.limit({ key: "mcp" })).success) {
+      return Response.json(
+        { jsonrpc: "2.0", error: { code: -32000, message: "Too many requests; retry in a minute." }, id: null },
+        { status: 429 },
+      );
+    }
 
     const server = new McpServer(
       { name: "billigast", title: "Billigast", version: "0.1.0" },
