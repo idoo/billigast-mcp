@@ -1,0 +1,634 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Billigast</title>
+<style>
+:root {
+  --bg: #ffffff; --surface: #ffffff; --sunken: #f4f5f7; --border: #e4e6ea; --border-strong: #cfd3da;
+  --text: #16181d; --muted: #646b78; --faint: #9aa1ad;
+  --accent: #0e7a5f; --accent-soft: #e5f4ee; --link: #0b63ce;
+  --ok: #157a3f; --ok-soft: #e6f5ec; --warn: #a14b06; --warn-soft: #fdf1e3;
+  --pj: #1f55c7; --pr: #0b7a62;
+  --imgbg: #ffffff;
+  --shadow: 0 1px 2px rgba(22,24,29,.05);
+  --radius: 12px;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --bg: #18191b; --surface: #212226; --sunken: #2a2c31; --border: #34363c; --border-strong: #464951;
+  --text: #f2f3f5; --muted: #a2a8b3; --faint: #737985;
+  --accent: #4fd1a5; --accent-soft: #1d3029; --link: #79aefc;
+  --ok: #5ad48b; --ok-soft: #1c3124; --warn: #f2b45a; --warn-soft: #382a17;
+  --pj: #7ea6ff; --pr: #4fd1b0;
+  --imgbg: #f6f6f7;
+  --shadow: none;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text); }
+body { font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+button { font: inherit; color: inherit; cursor: pointer; }
+a { color: var(--link); text-decoration: none; }
+a:hover { text-decoration: underline; }
+#app { padding: 14px 14px 16px; }
+.muted { color: var(--muted); }
+.num { font-variant-numeric: tabular-nums; }
+
+/* top bar */
+.head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; min-width: 0; flex-wrap: wrap; }
+.brand { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; letter-spacing: -.01em; flex: 0 0 auto; }
+.brand::before { content: ""; width: 8px; height: 8px; border-radius: 2px; background: var(--accent); transform: rotate(45deg); }
+.head .q { font-size: 14px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; }
+.head .count { font-size: 12.5px; color: var(--muted); flex: 0 0 auto; }
+
+/* site badges: different text, fill and shape so they don't rely on colour */
+.site { display: inline-flex; align-items: center; justify-content: center; height: 18px; min-width: 24px; padding: 0 5px; font-size: 10.5px; font-weight: 700; letter-spacing: .02em; flex: 0 0 auto; line-height: 1; }
+.site.pj { background: var(--pj); color: var(--bg); border-radius: 4px; }
+.site.pr { border: 1.5px solid var(--pr); color: var(--pr); border-radius: 999px; }
+.sites { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+
+/* search cards */
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(208px, 1fr)); gap: 10px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; text-align: left; padding: 0; min-width: 0; transition: border-color .15s, box-shadow .15s; }
+.card:hover { border-color: var(--border-strong); box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+.card:focus-visible { outline: 2px solid var(--link); outline-offset: 1px; }
+.card[aria-busy="true"] { opacity: .6; cursor: progress; }
+.ph { aspect-ratio: 4 / 3; background: var(--imgbg); display: grid; place-items: center; overflow: hidden; border-bottom: 1px solid var(--border); position: relative; }
+.ph img { max-width: 86%; max-height: 86%; object-fit: contain; display: block; }
+.noimg { color: #9aa1ad; font-size: 12px; }
+.cb { padding: 10px 11px 11px; display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 0; }
+.name { font-weight: 600; font-size: 13.5px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; min-height: 2.6em; }
+.sub { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.best { display: flex; align-items: center; gap: 6px; margin-top: 2px; flex-wrap: wrap; }
+.best .from { font-size: 12px; color: var(--muted); }
+.best .p { font-size: 17px; font-weight: 700; letter-spacing: -.01em; }
+.best .p.none { font-size: 14px; color: var(--muted); font-weight: 600; }
+.chips { display: flex; flex-direction: column; gap: 4px; margin-top: 2px; }
+.chip { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 7px; align-items: center; font-size: 12px; padding: 5px 8px; border-radius: 8px; background: var(--sunken); }
+.chip .site { grid-column: 1; grid-row: span 2; }
+.chip .lbl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.chip .cnt { grid-column: 2; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.25; }
+.chip .v { font-weight: 600; grid-column: 3; grid-row: 1 / span 2; }
+.chip.low .v { color: var(--ok); }
+.go { margin-top: auto; padding-top: 6px; font-size: 12.5px; font-weight: 600; color: var(--link); }
+.go.err { color: var(--warn); }
+
+/* notices / states */
+.notice { margin: 0 0 12px; padding: 8px 11px; border-radius: 9px; font-size: 12.5px; background: var(--warn-soft); color: var(--warn); display: flex; gap: 8px; align-items: flex-start; overflow-wrap: anywhere; }
+.notice b { flex: 0 0 auto; }
+.empty { padding: 26px 10px; text-align: center; color: var(--muted); }
+.sk { background: linear-gradient(90deg, var(--sunken) 25%, var(--border) 50%, var(--sunken) 75%); background-size: 200% 100%; animation: sh 1.2s infinite linear; border-radius: 8px; }
+@keyframes sh { to { background-position: -200% 0; } }
+.wait { display: grid; grid-template-columns: repeat(auto-fill, minmax(208px, 1fr)); gap: 10px; }
+.wait .sk { height: 250px; border-radius: var(--radius); }
+.wait-row { height: 44px; margin-top: 8px; }
+.btn { border: 1px solid var(--border-strong); background: var(--surface); border-radius: 999px; padding: 5px 12px; font-weight: 600; font-size: 12.5px; }
+.btn:hover { background: var(--sunken); }
+.back { margin-bottom: 12px; }
+
+/* compare header */
+.ph-head { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 14px; min-width: 0; }
+.ph-head .ph { flex: 0 0 88px; width: 88px; border: 1px solid var(--border); border-radius: 10px; aspect-ratio: 1; }
+.ph-head .info { min-width: 0; flex: 1; }
+.ph-head h1 { font-size: 17px; line-height: 1.25; margin: 0 0 3px; letter-spacing: -.01em; overflow-wrap: anywhere; }
+.ph-head .links { display: flex; gap: 6px 12px; flex-wrap: wrap; margin-top: 6px; font-size: 12.5px; }
+.ph-head .links a { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; margin-bottom: 14px; }
+.tile { border: 1px solid var(--border); border-radius: 10px; padding: 9px 11px; background: var(--surface); min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.tile .k { font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+.tile .v { font-size: 20px; font-weight: 700; letter-spacing: -.02em; }
+.tile.main { background: var(--accent-soft); border-color: transparent; }
+.tile.main .v { color: var(--accent); }
+.tile .s { font-size: 12.5px; display: flex; align-items: center; gap: 4px 6px; min-width: 0; flex-wrap: wrap; }
+.tile .s .sites { flex-wrap: nowrap; }
+.tile .s .st { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile .none { font-size: 13px; color: var(--muted); margin-top: 4px; }
+.nohist { font-size: 12.5px; color: var(--muted); margin: -4px 0 14px; }
+
+/* history */
+.hist { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px 9px; margin-bottom: 14px; background: var(--surface); }
+.hist .top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+.hist h2, .sec-h { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0; font-weight: 600; }
+.hist .stats { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12.5px; color: var(--muted); }
+.hist .stats b { color: var(--text); font-weight: 600; }
+.spark { position: relative; height: 84px; margin: 0 0 0 54px; }
+.spark svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.spark .yl { position: absolute; left: -54px; width: 48px; text-align: right; font-size: 11px; color: var(--muted); transform: translateY(-50%); white-space: nowrap; }
+.spark .dot { position: absolute; width: 8px; height: 8px; border-radius: 50%; transform: translate(-50%, -50%); border: 2px solid var(--surface); }
+.spark .dot.now { background: var(--accent); }
+.spark .dot.lo { background: var(--ok); }
+.xl { display: flex; justify-content: space-between; margin: 4px 0 0 54px; font-size: 11px; color: var(--muted); }
+.verdict { margin-top: 8px; font-size: 13px; padding: 6px 10px; border-radius: 8px; background: var(--sunken); overflow-wrap: anywhere; }
+.verdict.lo { background: var(--ok-soft); color: var(--ok); }
+
+/* offers */
+.sec-row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 6px; flex-wrap: wrap; }
+.legend { display: flex; gap: 12px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.offers { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--surface); }
+.orow { display: grid; grid-template-columns: minmax(0, 1fr) 76px 92px 74px 96px minmax(84px, 150px) 92px 64px; gap: 10px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 13px; min-width: 0; }
+.orow:last-child { border-bottom: 0; }
+.orow.hd { font-size: 11.5px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .03em; padding-top: 7px; padding-bottom: 7px; background: var(--sunken); }
+.orow.first { background: var(--accent-soft); }
+.orow .r { text-align: right; }
+.orow .store { min-width: 0; }
+.orow .store .n { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.orow .store .t { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cond { display: inline-block; font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 4px; background: var(--warn-soft); color: var(--warn); margin-left: 6px; vertical-align: 1px; }
+.orow .tot { font-weight: 700; }
+.orow .stock { font-size: 12px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stock.yes { color: var(--ok); }
+.stock.no { color: var(--muted); }
+.orow .rate { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.orow .lnk { text-align: right; font-weight: 600; font-size: 12.5px; white-space: nowrap; }
+.foot { margin-top: 8px; font-size: 12px; color: var(--muted); }
+.lbl-m { display: none; }
+
+.tot-m { display: none; }
+@media (max-width: 760px) {
+  .orow { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "store totm" "meta lnk"; row-gap: 3px; }
+  .orow.hd { display: none; }
+  .orow .store { grid-area: store; }
+  .orow .tot-m { display: block; grid-area: totm; text-align: right; font-size: 14px; font-weight: 700; }
+  .orow .meta .tot { display: none; }
+  .orow .lnk { grid-area: lnk; }
+  .orow .meta { grid-area: meta; display: flex; gap: 4px 12px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--muted); min-width: 0; }
+  .orow .meta > * { text-align: left; }
+  .orow .meta .stock { max-width: 100%; }
+  .orow .meta .rate:empty { display: none; }
+  .lbl-m { display: inline; color: var(--faint); margin-right: 3px; }
+}
+@media (min-width: 761px) {
+  .orow .meta { display: contents; }
+}
+@media (max-width: 460px) {
+  .ph-head .ph { flex-basis: 64px; width: 64px; }
+  .ph-head h1 { font-size: 15px; }
+}
+</style>
+</head>
+<body>
+<div id="app" aria-live="polite"></div>
+<script>
+(() => {
+  "use strict";
+  const app = document.getElementById("app");
+  const oa = () => window.openai;
+
+  // ---------- host bridge (MCP Apps postMessage JSON-RPC, with window.openai fallback) ----------
+  let rpcId = 0;
+  const pending = new Map();
+  let hostCaps = null;
+  let hostData = null; // last structuredContent the host delivered
+  let searchData = null; // the search result to go back to from a compare opened by tapping a card
+  let inCompare = false; // showing a compare opened from a card
+
+  function rpc(method, params, timeoutMs = 30000) {
+    const id = ++rpcId;
+    window.parent.postMessage({ jsonrpc: "2.0", id, method, params }, "*");
+    return new Promise((resolve, reject) => {
+      const t = setTimeout(() => { pending.delete(id); reject(new Error("timeout")); }, timeoutMs);
+      pending.set(id, { resolve: (v) => { clearTimeout(t); resolve(v); }, reject: (e) => { clearTimeout(t); reject(e); } });
+    });
+  }
+  const notify = (method, params) => window.parent.postMessage({ jsonrpc: "2.0", method, params }, "*");
+
+  window.addEventListener("message", (e) => {
+    if (e.source !== window.parent) return;
+    const m = e.data;
+    if (!m || m.jsonrpc !== "2.0") return;
+    if (m.id != null && pending.has(m.id) && !m.method) {
+      const p = pending.get(m.id); pending.delete(m.id);
+      m.error ? p.reject(new Error(m.error.message || "error")) : p.resolve(m.result);
+      return;
+    }
+    const params = m.params || {};
+    switch (m.method) {
+      case "ui/notifications/tool-result": show(params.structuredContent); break;
+      case "ui/notifications/host-context-changed": applyContext(params); break;
+      case "ui/resource-teardown": if (m.id != null) window.parent.postMessage({ jsonrpc: "2.0", id: m.id, result: {} }, "*"); break;
+    }
+  });
+
+  function applyContext(ctx) { if (ctx && ctx.theme) setTheme(ctx.theme); }
+
+  function setTheme(t) {
+    const dark = t ? t === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+    document.documentElement.dataset.theme = dark ? "dark" : "light";
+  }
+
+  const canCallTools = () => !!(oa() && oa().callTool) || !!(hostCaps && hostCaps.serverTools);
+
+  async function callTool(name, args) {
+    const res = oa() && oa().callTool ? await oa().callTool(name, args) : await rpc("tools/call", { name, arguments: args }, 60000);
+    if (res && res.isError) throw new Error("tool error");
+    return res && (res.structuredContent || res);
+  }
+
+  function openUrl(url) {
+    if (!/^https:\/\//.test(url)) return;
+    if (oa() && oa().openExternal) { oa().openExternal({ href: url }); return; }
+    rpc("ui/open-link", { url }, 5000).catch(() => window.open(url, "_blank", "noopener"));
+  }
+
+  new ResizeObserver(() => {
+    const h = Math.ceil(document.documentElement.getBoundingClientRect().height);
+    notify("ui/notifications/size-changed", { width: Math.ceil(document.documentElement.scrollWidth), height: h });
+  }).observe(document.documentElement);
+
+  // ---------- helpers ----------
+  function el(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = String(text);
+    return n;
+  }
+  function add(parent, ...kids) { for (const k of kids) if (k) parent.append(k); return parent; }
+  const group = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, "\u00a0");
+  /** "2 490 kr", "2 529,99 kr"; wholeKr rounds to whole kronor for tight spots. */
+  function kr(n, wholeKr) {
+    if (n == null || !isFinite(n)) return "–";
+    const cents = Math.round(Math.abs(n) * (wholeKr ? 1 : 100)) * (wholeKr ? 100 : 1);
+    const ore = cents % 100;
+    return (n < 0 ? "-" : "") + group((cents - ore) / 100) + (ore ? "," + String(ore).padStart(2, "0") : "") + "\u00a0kr";
+  }
+  const httpsUrl = (u) => (typeof u === "string" && /^https:\/\//.test(u) ? u : null);
+  function img(src, alt) {
+    const i = el("img");
+    i.loading = "lazy"; i.decoding = "async"; i.alt = alt || ""; i.referrerPolicy = "no-referrer";
+    i.src = src;
+    return i;
+  }
+  function picture(src, alt) {
+    const ph = el("div", "ph");
+    const u = httpsUrl(src);
+    if (u) {
+      const i = img(u, alt);
+      i.onerror = () => ph.replaceChildren(el("span", "noimg", "No image"));
+      ph.append(i);
+    } else ph.append(el("span", "noimg", "No image"));
+    return ph;
+  }
+  function link(text, url, cls) {
+    const a = el("a", cls, text);
+    const u = httpsUrl(url);
+    if (u) {
+      a.href = u; a.target = "_blank"; a.rel = "noopener noreferrer";
+      a.onclick = (e) => { e.preventDefault(); e.stopPropagation(); openUrl(u); };
+    }
+    return a;
+  }
+
+  const SITES = { prisjakt: { label: "Prisjakt", short: "PJ", cls: "pj" }, pricerunner: { label: "PriceRunner", short: "PR", cls: "pr" } };
+  const SITE_ORDER = ["prisjakt", "pricerunner"];
+  function siteBadge(id, title) {
+    const s = SITES[id];
+    if (!s) return null;
+    const b = el("span", "site " + s.cls, s.short);
+    b.title = title || s.label;
+    b.setAttribute("aria-label", title || s.label);
+    return b;
+  }
+  const siteLabel = (id) => (SITES[id] ? SITES[id].label : String(id));
+  function plural(n, one, many) { return n + " " + (n === 1 ? one : many); }
+
+  function notices(errors) {
+    if (!Array.isArray(errors) || !errors.length) return null;
+    const box = el("div", "notice");
+    box.setAttribute("role", "status");
+    const parts = errors.map((e) => siteLabel(e.source) + " didn't answer" + (e.message ? " (" + e.message + ")" : ""));
+    add(box, el("b", null, "!"), el("span", null, parts.join(". ") + ". Showing what the other site returned."));
+    return box;
+  }
+
+  function head(text, count) {
+    const h = el("div", "head");
+    add(h, el("span", "brand", "Billigast"));
+    if (text) h.append(el("span", "q", text));
+    if (count) h.append(el("span", "count", count));
+    return h;
+  }
+
+  function waiting() {
+    const w = el("div", "wait");
+    for (let i = 0; i < 4; i++) w.append(el("div", "sk"));
+    app.replaceChildren(head(null, "Looking up prices…"), w);
+  }
+
+  // ---------- search ----------
+  function productCard(p) {
+    const card = el("button", "card");
+    card.type = "button";
+    card.append(picture(p.image, p.name));
+    const cb = el("div", "cb");
+    cb.append(el("div", "name", p.name));
+    const sub = [p.brand, p.category].filter(Boolean).join(" · ");
+    if (sub) cb.append(el("div", "sub", sub));
+
+    const best = el("div", "best");
+    if (p.cheapest) {
+      add(best, el("span", "from", "from"), el("span", "p num", kr(p.cheapest.price)), siteBadge(p.cheapest.source, "Cheapest on " + siteLabel(p.cheapest.source)));
+    } else best.append(el("span", "p none", "No price listed"));
+    cb.append(best);
+
+    const chips = el("div", "chips");
+    const listed = SITE_ORDER.filter((s) => p.sources && p.sources[s]);
+    for (const s of listed) {
+      const l = p.sources[s];
+      const low = p.cheapest && listed.length > 1 && p.cheapest.source === s;
+      const chip = el("div", "chip" + (low ? " low" : ""));
+      const v = el("span", "v num", kr(l.lowest_price, true));
+      v.title = kr(l.lowest_price);
+      add(chip, siteBadge(s), el("span", "lbl", siteLabel(s)), v);
+      if (l.offer_count != null) chip.append(el("span", "cnt", plural(l.offer_count, "store", "stores")));
+      chips.append(chip);
+    }
+    cb.append(chips);
+
+    const go = el("div", "go", canCallTools() ? "Compare stores →" : "Ask to compare stores");
+    cb.append(go);
+    card.append(cb);
+    card.setAttribute("aria-label", p.name + (p.cheapest ? ", from " + kr(p.cheapest.price) : "") + ". Compare stores");
+    card.onclick = () => openCompare(p, card, go);
+    return card;
+  }
+
+  async function openCompare(p, card, go) {
+    if (!canCallTools() || card.getAttribute("aria-busy") === "true") return;
+    card.setAttribute("aria-busy", "true");
+    go.className = "go"; go.textContent = "Comparing…";
+    const back = searchData;
+    const host = hostData;
+    try {
+      const res = await callTool("compare", { product: p.key });
+      if (hostData !== host) return; // the host showed something else meanwhile
+      if (!res || !res.product || !Array.isArray(res.offers)) throw new Error("bad result");
+      searchData = back;
+      inCompare = true;
+      renderCompare(res, true);
+      window.scrollTo(0, 0);
+    } catch (err) {
+      card.removeAttribute("aria-busy");
+      go.className = "go err"; go.textContent = "Couldn't load prices. Tap to retry";
+    }
+  }
+
+  function renderSearch(data) {
+    searchData = data;
+    const products = data.products || [];
+    app.replaceChildren(head("“" + data.query + "”", plural(products.length, "product", "products")));
+    const n = notices(data.errors);
+    if (n) app.append(n);
+    if (!products.length) { app.append(el("div", "empty", "Nothing found. Try a shorter or different name.")); return; }
+    const grid = el("div", "grid");
+    for (const p of products) grid.append(productCard(p));
+    app.append(grid);
+  }
+
+  // ---------- compare ----------
+  function offerSites(o) {
+    const wrap = el("span", "sites");
+    for (const s of SITE_ORDER) {
+      if (o.seen_on && o.seen_on[s] != null) wrap.append(siteBadge(s, siteLabel(s) + ": " + kr(o.seen_on[s])));
+    }
+    return wrap;
+  }
+  const condLabel = (c) => (c === "used" ? "Used" : c === "refurbished" ? "Refurbished" : null);
+  const totalOf = (o) => (o.total != null ? o.total : o.price);
+
+  function tile(label, o, main) {
+    const t = el("div", "tile" + (main ? " main" : ""));
+    t.append(el("div", "k", label));
+    if (!o) { t.append(el("div", "none", "None listed")); return t; }
+    t.append(el("div", "v num", kr(totalOf(o))));
+    const s = el("div", "s");
+    add(s, offerSites(o), link(o.store, o.url, "st"));
+    const c = condLabel(o.condition);
+    if (c) s.append(el("span", "cond", c));
+    t.append(s);
+    const extra = [];
+    if (o.total != null && o.shipping) extra.push(kr(o.price) + " + " + kr(o.shipping) + " shipping");
+    else if (o.total != null && o.shipping === 0) extra.push("Free shipping");
+    if (o.stock_text) extra.push(o.stock_text);
+    if (extra.length) t.append(el("div", "s muted", extra.join(" · ")));
+    return t;
+  }
+
+  function sparkline(h) {
+    const pts = (h.points || []).filter((p) => p && isFinite(p.price));
+    const box = el("div", "hist");
+    const top = el("div", "top");
+    add(top, el("h2", null, "Price history · " + siteLabel(h.source)));
+    const stats = el("div", "stats");
+    const stat = (k, v) => { if (v == null) return; const s = el("span"); add(s, document.createTextNode(k + " "), el("b", "num", v)); stats.append(s); };
+    stat("30 days low", h.lowest_30d != null ? kr(h.lowest_30d) : null);
+    stat("90 days low", h.lowest_90d != null ? kr(h.lowest_90d) : null);
+    if (h.lowest_ever) stat("Lowest ever", kr(h.lowest_ever.price) + " (" + h.lowest_ever.date + ")");
+    top.append(stats);
+    box.append(top);
+    if (pts.length < 2) return box;
+
+    const prices = pts.map((p) => p.price);
+    let lo = Math.min(...prices), hi = Math.max(...prices);
+    if (hi === lo) { hi += 1; lo -= 1; }
+    const pad = (hi - lo) * 0.08;
+    const yMin = lo - pad, yMax = hi + pad;
+    const X = (i) => (i / (pts.length - 1)) * 100;
+    const Y = (v) => (1 - (v - yMin) / (yMax - yMin)) * 100;
+
+    const sp = el("div", "spark");
+    const NS = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("viewBox", "0 0 100 100");
+    svg.setAttribute("preserveAspectRatio", "none");
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", "Lowest price per day from " + pts[0].date + " to " + pts[pts.length - 1].date + ", between " + kr(lo) + " and " + kr(hi));
+    // stepped line: a day's lowest price holds until the next point
+    let d = "M" + X(0) + " " + Y(pts[0].price);
+    for (let i = 1; i < pts.length; i++) d += " H" + X(i) + " V" + Y(pts[i].price);
+    const area = document.createElementNS(NS, "path");
+    area.setAttribute("d", d + " V100 H0 Z");
+    area.setAttribute("fill", "var(--accent)");
+    area.setAttribute("fill-opacity", "0.09");
+    const line = document.createElementNS(NS, "path");
+    line.setAttribute("d", d);
+    line.setAttribute("fill", "none");
+    line.setAttribute("stroke", "var(--accent)");
+    line.setAttribute("stroke-width", "2");
+    line.setAttribute("stroke-linejoin", "round");
+    line.setAttribute("vector-effect", "non-scaling-stroke");
+    for (const v of [hi, lo]) {
+      const g = document.createElementNS(NS, "line");
+      g.setAttribute("x1", "0"); g.setAttribute("x2", "100"); g.setAttribute("y1", Y(v)); g.setAttribute("y2", Y(v));
+      g.setAttribute("stroke", "var(--border)"); g.setAttribute("stroke-dasharray", "3 3"); g.setAttribute("vector-effect", "non-scaling-stroke");
+      svg.append(g);
+    }
+    svg.append(area, line);
+    sp.append(svg);
+    for (const [v, txt] of [[hi, kr(hi)], [lo, kr(lo)]]) {
+      const l = el("div", "yl num", txt);
+      l.style.top = Y(v) + "%";
+      sp.append(l);
+    }
+    const minI = prices.lastIndexOf(Math.min(...prices));
+    const dot = (i, cls) => { const n = el("div", "dot " + cls); n.style.left = X(i) + "%"; n.style.top = Y(pts[i].price) + "%"; n.title = pts[i].date + ": " + kr(pts[i].price); sp.append(n); };
+    if (minI !== pts.length - 1) dot(minI, "lo");
+    dot(pts.length - 1, "now");
+    box.append(sp);
+    const xl = el("div", "xl");
+    add(xl, el("span", null, pts[0].date), el("span", null, pts[pts.length - 1].date));
+    box.append(xl);
+    return box;
+  }
+
+  function offerRow(o, first) {
+    const r = el("div", "orow" + (first ? " first" : ""));
+    const store = el("div", "store");
+    const n = el("div", "n", o.store);
+    n.title = o.store;
+    const c = condLabel(o.condition);
+    if (c) n.append(el("span", "cond", c));
+    store.append(n);
+    if (o.title) { const t = el("div", "t", o.title); t.title = o.title; store.append(t); }
+    r.append(store);
+
+    const meta = el("div", "meta");
+    const cell = (cls, label, content) => {
+      const d = el("div", cls);
+      if (label) d.append(el("span", "lbl-m", label));
+      if (typeof content === "string") d.append(document.createTextNode(content)); else if (content) d.append(content);
+      return d;
+    };
+    // wide: meta is display:contents, so its cells are the columns sites | price | shipping | total | stock | rating.
+    // narrow: meta wraps into one line under the store name; the total moves top right (.tot-m).
+    const totTxt = kr(o.total != null ? o.total : o.price);
+    const tot = el("div", "tot r num", totTxt);
+    const totM = el("div", "tot-m num", totTxt);
+    if (o.total == null) tot.title = totM.title = "Shipping not reported";
+    const stockCls = o.in_stock === true ? "stock yes" : o.in_stock === false ? "stock no" : "stock";
+    const stockTxt = o.stock_text || (o.in_stock === true ? "In stock" : o.in_stock === false ? "Not in stock" : "–");
+    const st = el("div", stockCls, stockTxt);
+    st.title = stockTxt;
+    const rt = o.store_rating;
+    add(meta,
+      cell("", null, offerSites(o)),
+      cell("r num", "Price", kr(o.price)),
+      cell("r num", "Shipping", o.shipping == null ? "–" : o.shipping === 0 ? "Free" : kr(o.shipping)),
+      tot, st,
+      el("div", "rate", rt ? "★ " + rt.score.toFixed(1) + (rt.count ? " (" + group(rt.count) + ")" : "") : ""));
+    add(r, meta, totM);
+    const a = link("Store ↗", o.url, "lnk");
+    a.setAttribute("aria-label", "Open " + o.store);
+    r.append(a);
+    return r;
+  }
+
+  function renderCompare(data, fromSearch) {
+    const p = data.product || {};
+    app.replaceChildren();
+    if (fromSearch && searchData) {
+      const b = el("button", "btn back", "← Back to results");
+      b.onclick = () => { inCompare = false; renderSearch(searchData); window.scrollTo(0, 0); };
+      app.append(b);
+    }
+    const n = notices(data.errors);
+
+    const hd = el("div", "ph-head");
+    hd.append(picture(p.image, p.name));
+    const info = el("div", "info");
+    info.append(el("h1", null, p.name));
+    const sub = [p.brand, p.category].filter(Boolean).join(" · ");
+    if (sub) info.append(el("div", "sub", sub));
+    const links = el("div", "links");
+    for (const s of SITE_ORDER) {
+      const l = p.sources && p.sources[s];
+      if (!l) continue;
+      const a = link("", l.url);
+      add(a, siteBadge(s), document.createTextNode(siteLabel(s) + (l.offer_count != null ? " · " + plural(l.offer_count, "store", "stores") : "") + " ↗"));
+      links.append(a);
+    }
+    if (links.children.length) info.append(links);
+    hd.append(info);
+    app.append(hd);
+    if (n) app.append(n);
+
+    const tiles = el("div", "tiles");
+    add(tiles, tile("Cheapest", data.cheapest, true), tile("Cheapest in stock", data.cheapest_in_stock));
+    if (data.cheapest_secondhand) tiles.append(tile("Cheapest secondhand", data.cheapest_secondhand));
+    app.append(tiles);
+
+    if (data.history) {
+      const h = sparkline(data.history);
+      if (data.verdict) {
+        const low = /\blowest\b/.test(data.verdict) && !/above/.test(data.verdict);
+        h.append(el("div", "verdict" + (low ? " lo" : ""), data.verdict));
+      }
+      app.append(h);
+    } else {
+      const why = p.sources && p.sources.prisjakt ? "" : " Only Prisjakt tracks prices over time, and this product wasn't found there.";
+      app.append(el("div", "nohist", "No price history." + why));
+    }
+
+    const offers = data.offers || [];
+    const row = el("div", "sec-row");
+    row.append(el("h2", "sec-h", plural(offers.length, "store", "stores")));
+    const lg = el("div", "legend");
+    const used = SITE_ORDER.filter((s) => offers.some((o) => o.seen_on && o.seen_on[s] != null));
+    for (const s of used) { const sp = el("span"); add(sp, siteBadge(s), document.createTextNode(siteLabel(s))); lg.append(sp); }
+    row.append(lg);
+    app.append(row);
+    if (!offers.length) {
+      app.append(el("div", "empty", "No store offers match."));
+    } else {
+      const tbl = el("div", "offers");
+      tbl.setAttribute("role", "table");
+      const h = el("div", "orow hd");
+      for (const [t, r] of [["Store", 0], ["Sites", 0], ["Price", 1], ["Shipping", 1], ["Total", 1], ["Stock", 0], ["Rating", 0], ["", 0]]) h.append(el("div", r ? "r" : "", t));
+      tbl.append(h);
+      offers.forEach((o, i) => tbl.append(offerRow(o, i === 0)));
+      app.append(tbl);
+    }
+    app.append(el("div", "foot", "Prices in SEK incl. VAT. Total includes shipping where the site reports it. Links go via " + SITE_ORDER.filter((s) => p.sources && p.sources[s]).map(siteLabel).join(" and ") + "."));
+  }
+
+  function show(sc) {
+    if (!sc || typeof sc !== "object") return;
+    if (hostData === sc) return;
+    hostData = sc;
+    inCompare = false;
+    try {
+      if (Array.isArray(sc.products)) renderSearch(sc);
+      else if (sc.product && Array.isArray(sc.offers)) { searchData = null; renderCompare(sc, false); }
+    } catch (err) {
+      app.replaceChildren(el("div", "empty", "Couldn't show the result."));
+      console.error(err);
+    }
+  }
+
+  // ---------- boot ----------
+  setTheme(oa() && oa().theme);
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { if (!(oa() && oa().theme)) setTheme(); });
+  waiting();
+  if (oa() && oa().toolOutput) show(oa().toolOutput);
+  window.addEventListener("openai:set_globals", (e) => {
+    const g = (e.detail && e.detail.globals) || {};
+    if (g.theme) setTheme(g.theme);
+    if (g.toolOutput) show(g.toolOutput);
+  });
+  rpc("ui/initialize", {
+    protocolVersion: "2026-01-26",
+    appInfo: { name: "billigast-widget", version: "1.0.0" },
+    appCapabilities: {},
+  }, 10000).then((r) => {
+    hostCaps = (r && r.hostCapabilities) || {};
+    applyContext(r && r.hostContext);
+    notify("ui/notifications/initialized", {});
+    // cards were drawn before hostCaps were known: redraw so "Compare stores" is offered
+    if (!inCompare && hostData && Array.isArray(hostData.products)) renderSearch(hostData);
+  }).catch(() => {});
+})();
+</script>
+</body>
+</html>

@@ -4,6 +4,7 @@ import { isNew, lowestNewPrice, matchProducts, mentionsQuery, mergedProduct, mer
 import { pricerunner } from "./sources/pricerunner.js";
 import { prisjakt } from "./sources/prisjakt.js";
 import type { CompareResult, MatchKind, MergedOffer, ProductDetail, ProductHit, SearchOptions, SearchResult, Source, SourceFailure, SourceId } from "./types.js";
+import { WIDGET_TOOL_META } from "./widget/index.js";
 
 export const INSTRUCTIONS = `Finds a product cheaper by checking Prisjakt and PriceRunner, Sweden's two price comparison sites, at once. Flow: search → compare with a product's key for every store's price. Prices are SEK incl. VAT; shipping only where the site reports it. The same store listed on both sites is merged into one row. Prisjakt adds price history. Links go via the comparison sites. Read-only.
 search merges both sites' hits into one product when they are the same model (GTIN or model, capacity, size and variant words agree; colours may be merged when one site lists none); sources shows each site's own price and offer count, cheapest the lower one. Variants such as 128 vs 256 GB or Pro vs non-Pro stay separate products.
@@ -129,6 +130,7 @@ export function registerTools(server: McpServer) {
           .describe("Sites to search, default both: ['prisjakt'], ['pricerunner'] or both."),
       },
       annotations: { title: "Search Prisjakt and PriceRunner", ...READ_ONLY },
+      _meta: WIDGET_TOOL_META,
     },
     ({ query, min_price, max_price, limit, sources }) =>
       result(() => search(query, { limit, min_price, max_price }, sources ? SOURCE_IDS.filter((s) => sources.includes(s)) : SOURCE_IDS)),
@@ -157,6 +159,7 @@ export function registerTools(server: McpServer) {
         limit: z.number().int().min(1).max(50).default(20).describe("Offers to list, 1-50, default 20."),
       },
       annotations: { title: "Compare store prices", ...READ_ONLY },
+      _meta: WIDGET_TOOL_META,
     },
     (args) => result(() => compare(args)),
   );

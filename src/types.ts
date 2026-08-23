@@ -1,5 +1,5 @@
 // Shared shapes. Sources (src/sources/*) return ProductHit / ProductDetail; tools (src/tools.ts)
-// merge them into SearchResult / CompareResult, returned as structuredContent.
+// merge them into SearchResult / CompareResult, which are also the widget's structuredContent.
 // All prices are SEK including VAT, as plain numbers.
 
 export type SourceId = "prisjakt" | "pricerunner";
@@ -104,7 +104,7 @@ export class SourceError extends Error {
   }
 }
 
-// ---- Tool results (structuredContent) ----
+// ---- Tool results (structuredContent; the widget renders these) ----
 
 export interface SourceListing {
   id: string;

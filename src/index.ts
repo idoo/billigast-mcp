@@ -6,6 +6,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { CfWorkerJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/cfworker";
 import { INSTRUCTIONS, registerTools } from "./tools.js";
+import { registerWidget } from "./widget/index.js";
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -25,10 +26,11 @@ export default {
     }
 
     const server = new McpServer(
-      { name: "billigast", title: "Billigast", version: "0.1.0" },
+      { name: "billigast", title: "Billigast", version: "0.2.0" },
       { instructions: INSTRUCTIONS, jsonSchemaValidator: new CfWorkerJsonSchemaValidator() },
     );
     registerTools(server);
+    registerWidget(server);
     const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     await server.connect(transport);
     return transport.handleRequest(request);

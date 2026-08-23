@@ -9,6 +9,8 @@ Read-only. No accounts or API keys.
 - `search` finds a product on both sites. It won't lump a 128 GB phone in with the 256 GB one, or Pro with Pro Max.
 - `compare` takes a key from `search` and lists every store. It tells you how far today's price is from the 90-day low too.
 
+In ChatGPT both show a small card view.
+
 ## Deploy
 
 It runs on a Cloudflare Worker, free plan:
