@@ -88,6 +88,13 @@ async function fetchDetails(ids: Partial<Record<SourceId, string>>, errors: Sour
   return details;
 }
 
+/** The full name, then the name cut before "med"/"with"/" - "/",", then its first five words. */
+function counterpartQueries(name: string): string[] {
+  const cut = name.split(/\s+(?:med|with|inkl\.?|för|for)\s+|\s+[-–]\s+|,/i)[0].trim();
+  const short = cut.replace(/[()]/g, " ").split(/\s+/).filter(Boolean).slice(0, 5).join(" ");
+  return [...new Set([name, cut, short])].filter((query) => query.length >= 3);
+}
+
 async function compare(args: CompareArgs): Promise<CompareResult> {
   const errors: SourceFailure[] = [];
   const { ids, match: resolved } = await resolve(args.product, errors);
@@ -97,16 +104,20 @@ async function compare(args: CompareArgs): Promise<CompareResult> {
 
   let match = resolved;
   // One site known: look the product up on the other by name and take its best hit that is the same product.
+  // PriceRunner's search wants close wording, so a long Prisjakt name ("... med MagSafe laddningsfodral USB-C")
+  // finds nothing; shorter forms of the name are tried next.
   const other = SOURCE_IDS.find((source) => !ids[source] && !errors.some((e) => e.source === source));
   if (found.length === 1 && other) {
     const base = details[found[0]] as ProductDetail;
     try {
-      for (const hit of await SOURCES[other].search(base.name, { limit: 5 })) {
-        const kind = matchProducts(base, hit);
-        if (!kind) continue;
-        Object.assign(details, await fetchDetails({ [other]: hit.id }, errors));
-        if (details[other]) match = kind;
-        break;
+      lookup: for (const query of counterpartQueries(base.name)) {
+        for (const hit of await SOURCES[other].search(query, { limit: 5 })) {
+          const kind = matchProducts(base, hit);
+          if (!kind) continue;
+          Object.assign(details, await fetchDetails({ [other]: hit.id }, errors));
+          if (details[other]) match = kind;
+          break lookup;
+        }
       }
     } catch (error) {
       errors.push({ source: other, message: message(error) });
