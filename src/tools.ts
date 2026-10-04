@@ -8,7 +8,7 @@ import { WIDGET_TOOL_META } from "./widget/index.js";
 
 export const INSTRUCTIONS = `Finds a product cheaper by checking Prisjakt and PriceRunner, Sweden's two price comparison sites, at once. Flow: search → compare with a product's key for every store's price; compare also takes a Prisjakt/PriceRunner product URL or a plain product name directly. Prices are SEK incl. VAT; shipping only where the site reports it. The same store listed on both sites is merged into one row. Prisjakt adds price history. Links go via the comparison sites. Read-only.
 search merges both sites' hits into one product when they are the same model (GTIN or model, capacity, size and variant words agree; colours may be merged when one site lists none); sources shows each site's own price and offer count, cheapest the lower one. Variants such as 128 vs 256 GB or Pro vs non-Pro stay separate products.
-compare returns new offers only unless include_used (cheapest_secondhand is reported regardless), cheapest_in_stock is reported in stock. Also the price history and a verdict against the 90-day and all-time lows. A key or URL from one site gets its counterpart on the other looked up by name; errors lists a site that failed while the other still answered.
+compare returns new offers only unless include_used (cheapest_secondhand is reported regardless), sold-out offers last; cheapest and cheapest_secondhand skip sold-out offers (their prices are often stale) unless nothing else is listed, cheapest_in_stock is reported in stock. Also the price history and a verdict against the 90-day and all-time lows. A key or URL from one site gets its counterpart on the other looked up by name; errors lists a site that failed while the other still answered.
 Always give the user each offer's url. Keep at most 3 calls in parallel.`;
 
 const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true };
@@ -135,6 +135,8 @@ async function compare(args: CompareArgs): Promise<CompareResult> {
 
   const all = mergeOffers(listed.flatMap((detail) => detail.offers));
   const fresh = all.filter(isNew);
+  // mergeOffers puts sold-out rows last, so the first new / used row is the cheapest one not known to
+  // be sold out, falling back to a sold-out one only when nothing else is listed.
   const cheapest = fresh[0] ?? null;
   const cheapest_in_stock = fresh.find((offer) => offer.in_stock === true) ?? null;
   const cheapest_secondhand = all.find((offer) => !isNew(offer)) ?? null;
@@ -190,7 +192,7 @@ export function registerTools(server: McpServer) {
     {
       title: "Compare store prices",
       description:
-        "Every store's price for one product across Prisjakt and PriceRunner, cheapest first by total (price + shipping) when shipping is known, else price. The same store on both sites is one row with both prices in seen_on. Also cheapest (new), cheapest_secondhand (used/refurbished), cheapest_in_stock (new, reported in stock), Prisjakt's price history (lowest new price per day; 30/90-day and all-time lows) and a verdict on the cheapest price. With only one site known the other is looked up by name; not found = one site only.",
+        "Every store's price for one product across Prisjakt and PriceRunner, cheapest first by total (price + shipping) when shipping is known, else price; offers the site reports sold out come last. The same store on both sites is one row with both prices in seen_on. Also cheapest (new) and cheapest_secondhand (used/refurbished), both skipping sold-out offers unless nothing else is listed, cheapest_in_stock (new, reported in stock), Prisjakt's price history (lowest new price per day; 30/90-day and all-time lows) and a verdict on the cheapest price. With only one site known the other is looked up by name; not found = one site only.",
       inputSchema: {
         product: z
           .string()

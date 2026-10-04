@@ -314,10 +314,20 @@ export function storeKey(name: string): string {
 
 const cost = (offer: { total: number | null; price: number }) => offer.total ?? offer.price;
 
+/** Not known to be sold out (in stock or stock unknown). Sold-out rows often carry stale low prices. */
+export const isBuyable = (offer: { in_stock: boolean | null }) => offer.in_stock !== false;
+
+/** The offers not known to be sold out, or all of them when every one is. */
+function preferBuyable<T extends { in_stock: boolean | null }>(offers: T[]): T[] {
+  return offers.some(isBuyable) ? offers.filter(isBuyable) : offers;
+}
+
 /**
  * One row per store and condition across sites (condition null counts as new): a store's several
  * rows on one site collapse to its cheapest, the same store on both sites becomes one row with the
- * lower price and both prices in seen_on. Sorted cheapest first by total when known, else price.
+ * lower price and both prices in seen_on. Rows not known to be sold out win over sold-out ones.
+ * Sorted with sold-out rows last, otherwise cheapest first by total when known, else price, so the
+ * first new / used row is the cheapest buyable one when any exists.
  */
 export function mergeOffers(offers: Offer[]): MergedOffer[] {
   const groups = new Map<string, Offer[]>();
@@ -330,14 +340,15 @@ export function mergeOffers(offers: Offer[]): MergedOffer[] {
   }
   const merged: MergedOffer[] = [];
   for (const group of groups.values()) {
-    const best = group.reduce((a, b) => (cost(b) < cost(a) || (cost(b) === cost(a) && b.price < a.price) ? b : a));
+    const pool = preferBuyable(group);
+    const best = pool.reduce((a, b) => (cost(b) < cost(a) || (cost(b) === cost(a) && b.price < a.price) ? b : a));
     const seen_on: Partial<Record<SourceId, number>> = {};
     for (const source of new Set(group.map((offer) => offer.source))) {
-      seen_on[source] = Math.min(...group.filter((offer) => offer.source === source).map((offer) => offer.price));
+      seen_on[source] = Math.min(...preferBuyable(group.filter((offer) => offer.source === source)).map((offer) => offer.price));
     }
     merged.push({
       store: best.store,
-      price: Math.min(...group.map((offer) => offer.price)),
+      price: Math.min(...pool.map((offer) => offer.price)),
       shipping: best.shipping,
       total: best.total,
       in_stock: best.in_stock,
@@ -349,12 +360,12 @@ export function mergeOffers(offers: Offer[]): MergedOffer[] {
       seen_on,
     });
   }
-  return merged.sort((a, b) => cost(a) - cost(b) || a.price - b.price);
+  return merged.sort((a, b) => Number(!isBuyable(a)) - Number(!isBuyable(b)) || cost(a) - cost(b) || a.price - b.price);
 }
 
-/** Lowest new price of one site's offers. */
+/** Lowest new price of one site's offers, not counting sold-out rows unless all are. */
 export function lowestNewPrice(offers: Offer[]): number | null {
-  const prices = offers.filter(isNew).map((offer) => offer.price);
+  const prices = preferBuyable(offers.filter(isNew)).map((offer) => offer.price);
   return prices.length ? Math.min(...prices) : null;
 }
 

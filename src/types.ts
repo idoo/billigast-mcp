@@ -160,9 +160,9 @@ export interface MergedOffer {
 
 export interface CompareResult {
   product: MergedProduct;
-  /** One row per store and condition, cheapest first (by total when known, else price). New only unless include_used. */
+  /** One row per store and condition, cheapest first (by total when known, else price), sold-out rows last. New only unless include_used. */
   offers: MergedOffer[];
-  /** Cheapest new offer (condition "new" or unknown). */
+  /** Cheapest new offer (condition "new" or unknown), skipping sold-out rows unless nothing else is listed. */
   cheapest: MergedOffer | null;
   cheapest_in_stock: MergedOffer | null;
   /** Cheapest used or refurbished offer, reported even when include_used is false. */
