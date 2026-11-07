@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      # Builds dist/billigast-mcp.js, lists its tools over stdio (the smoke
+      # test: it fails when the server lists none), validates and packs .mcpb.
+      - name: Build stdio bundle and .mcpb
+        run: npm run build:mcpb
+      - name: Docker image lists tools over stdio
+        run: |
+          docker build -t billigast-mcp .
+          node scripts/list-tools.mjs docker run -i --rm billigast-mcp
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: actionlint
+        env:
+          ACTIONLINT_VERSION: "1.7.12"
+        run: |
+          curl -fsSL -o /tmp/actionlint.tgz \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          tar -xzf /tmp/actionlint.tgz -C /tmp actionlint
+          /tmp/actionlint -color
+      - name: shellcheck
+        run: shellcheck scripts/*.sh

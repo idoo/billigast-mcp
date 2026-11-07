@@ -1,0 +1,30 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.idoo/billigast-mcp",
+  "title": "Billigast",
+  "description": "Read-only MCP server: find the cheapest store for a product across Prisjakt and PriceRunner.",
+  "repository": {
+    "url": "https://github.com/idoo/billigast-mcp",
+    "source": "github"
+  },
+  "websiteUrl": "https://github.com/idoo/billigast-mcp",
+  "version": "0.9.0",
+  "packages": [
+    {
+      "registryType": "mcpb",
+      "identifier": "https://github.com/idoo/billigast-mcp/releases/download/v0.9.0/billigast-mcp-0.9.0.mcpb",
+      "version": "0.9.0",
+      "fileSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "transport": {
+        "type": "stdio"
+      }
+    },
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/idoo/billigast-mcp:0.9.0",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

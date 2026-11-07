@@ -1,0 +1,79 @@
+name: Release
+
+# Tag v<package.json version> → stdio bundle + .mcpb → multi-arch image
+# ghcr.io/idoo/billigast-mcp:<version> and :latest → GitHub release with the
+# .mcpb → MCP Registry (registry.yml). The Cloudflare Worker deploys separately.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # GitHub release + assets
+      packages: write # ghcr.io/idoo/billigast-mcp
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Tag matches package.json version
+        id: version
+        run: |
+          version=$(node -p 'require("./package.json").version')
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error title=Version mismatch::tag $GITHUB_REF_NAME but package.json says $version" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - run: npm ci
+      - run: npm run check
+      - name: Build stdio bundle and .mcpb
+        id: mcpb
+        run: echo "path=$(scripts/build-mcpb.sh)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/idoo/billigast-mcp:${{ steps.version.outputs.version }}
+            ghcr.io/idoo/billigast-mcp:latest
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MCPB: ${{ steps.mcpb.outputs.path }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "$MCPB" "$MCPB.sha256" \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --title "$GITHUB_REF_NAME" --generate-notes
+
+  registry:
+    needs: release
+    permissions:
+      contents: read
+      id-token: write # MCP Registry OIDC login
+    uses: ./.github/workflows/registry.yml
+    with:
+      tag: ${{ github.ref_name }}

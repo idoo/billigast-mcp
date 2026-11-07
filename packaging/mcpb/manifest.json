@@ -1,0 +1,38 @@
+{
+  "$schema": "https://raw.githubusercontent.com/modelcontextprotocol/mcpb/main/schemas/mcpb-manifest-latest.schema.json",
+  "manifest_version": "0.3",
+  "name": "billigast-mcp",
+  "display_name": "Billigast",
+  "version": "0.0.0",
+  "description": "Find the cheapest store for a product across Prisjakt and PriceRunner from Claude. Read-only, no account needed.",
+  "long_description": "Compare Swedish prices from Claude. Search Prisjakt and PriceRunner at once, see every store's offer for a product in SEK incl. VAT and find where it is cheapest. It only reads public price data. No account or API key is needed.",
+  "author": {
+    "name": "Ivan Verevkin",
+    "url": "https://github.com/idoo"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/idoo/billigast-mcp"
+  },
+  "homepage": "https://github.com/idoo/billigast-mcp",
+  "documentation": "https://github.com/idoo/billigast-mcp#readme",
+  "support": "https://github.com/idoo/billigast-mcp/issues",
+  "license": "MIT",
+  "keywords": ["prisjakt", "pricerunner", "sweden", "price-comparison", "shopping", "cheapest"],
+  "server": {
+    "type": "node",
+    "entry_point": "server/billigast-mcp.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/billigast-mcp.js"]
+    }
+  },
+  "tools_generated": false,
+  "prompts_generated": false,
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "node": ">=20.0.0"
+    }
+  }
+}

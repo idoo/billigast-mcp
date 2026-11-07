@@ -2,11 +2,7 @@
 // The endpoint lives at /mcp/<MCP_PATH_TOKEN>: ChatGPT's custom MCP connector offers only OAuth or no auth,
 // so the unguessable path is the access control; everything else is a cheap 404.
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import { CfWorkerJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/cfworker";
-import { INSTRUCTIONS, registerTools } from "./tools.js";
-import { registerWidget } from "./widget/index.js";
+import { handleMcp } from "./mcp.js";
 
 export default {
   async fetch(request, env): Promise<Response> {
@@ -25,14 +21,6 @@ export default {
       );
     }
 
-    const server = new McpServer(
-      { name: "billigast", title: "Billigast", version: "0.2.0" },
-      { instructions: INSTRUCTIONS, jsonSchemaValidator: new CfWorkerJsonSchemaValidator() },
-    );
-    registerTools(server);
-    registerWidget(server);
-    const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
-    await server.connect(transport);
-    return transport.handleRequest(request);
+    return handleMcp(request);
   },
 } satisfies ExportedHandler<Env>;

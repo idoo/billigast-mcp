@@ -11,9 +11,26 @@ Read-only. No accounts or API keys.
 
 In ChatGPT both show a small card view.
 
-## Deploy
+## Local
 
-It runs on a Cloudflare Worker, free plan:
+Claude Desktop: grab the `.mcpb` from [Releases](https://github.com/idoo/billigast-mcp/releases) and double-click it.
+
+Anything else can run it in Docker:
+
+```sh
+claude mcp add billigast -- docker run -i --rm ghcr.io/idoo/billigast-mcp
+```
+
+No Docker? Node 20 or newer works too:
+
+```sh
+npm ci && npm run build:stdio
+node dist/billigast-mcp.js
+```
+
+## ChatGPT, claude.ai
+
+ChatGPT and claude.ai won't talk to your laptop. I host mine on a Cloudflare Worker, free plan:
 
 ```sh
 npm ci && npx wrangler deploy
