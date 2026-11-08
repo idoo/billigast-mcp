@@ -4,6 +4,9 @@ Prisjakt and PriceRunner each know stores the other one doesn't, so this MCP ser
 
 Read-only. No accounts or API keys.
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![MCP](https://img.shields.io/badge/MCP-server-black)](https://modelcontextprotocol.io)
+
 ## Tools
 
 - `search` finds a product on both sites. It won't lump a 128 GB phone in with the 256 GB one, or Pro with Pro Max.
