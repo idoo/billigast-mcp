@@ -1,9 +1,10 @@
 // Prisjakt (prisjakt.nu). Search: GraphQL searchV3 (the site's relevance ranking and price filter)
-// enriched with products(ids) for brand, image, rating and GTIN. Product: GraphQL product, the
+// enriched with product(id) per hit for brand, image, rating and GTIN. Product: GraphQL product, the
 // offer list (GET /api/offer-list/{id}) and price history (POST /api/price-history).
 
 import type { Offer, ProductDetail, ProductHit, Rating, SearchOptions, Source } from "../types.js";
 import { SourceError } from "../types.js";
+import { secondhandCondition } from "./condition.js";
 import { priceHistory } from "./prisjakt/history.js";
 import { SITE, getJson, graphql } from "./prisjakt/http.js";
 
@@ -24,7 +25,10 @@ const SEARCH_QUERY = `query Search($filters: [SearchFilter!]!) {
   } }
 }`;
 
-const PRODUCTS_QUERY = `query Products($ids: [Int!]!) { products(ids: $ids) { ${PRODUCT_FIELDS} } }`;
+/** One aliased product(id) field per id: products(ids) answers null for the whole list when one id is gone. */
+function productsQuery(ids: number[]): string {
+  return `query Products { ${ids.map((id, i) => `p${i}: product(id: ${id}) { ${PRODUCT_FIELDS} }`).join(" ")} }`;
+}
 const PRODUCT_QUERY = `query Product($id: Int!) { product(id: $id) { ${PRODUCT_FIELDS} } }`;
 
 interface Card {
@@ -52,6 +56,7 @@ interface GqlProduct {
 
 interface Money {
   amount?: number | null;
+  currency?: string | null;
 }
 
 interface OfferRow {
@@ -70,12 +75,27 @@ const STOCK: Record<string, { in_stock: boolean | null; text: string }> = {
   InStock: { in_stock: true, text: "I lager" },
   LimitedStock: { in_stock: true, text: "Få i lager" },
   OutOfStock: { in_stock: false, text: "Ej i lager" },
+  Backorder: { in_stock: false, text: "Restnoterad" },
   Incoming: { in_stock: false, text: "Inkommande" },
   Preorder: { in_stock: false, text: "Förhandsbokning" },
   PreOrder: { in_stock: false, text: "Förhandsbokning" },
+  Unknown: { in_stock: null, text: "Okänd lagerstatus" },
 };
 
 const CONDITIONS: Record<string, Offer["condition"]> = { New: "new", Used: "used", Refurbished: "refurbished" };
+
+/**
+ * The model-code word of a query ("QE55Q80D" in "Samsung QE55Q80D"): letters and digits mixed, at least
+ * five characters, not a size like "128GB". searchV3 finds nothing for some brand + model-code queries
+ * that the code alone finds.
+ */
+function modelCode(query: string): string | null {
+  const words = query
+    .split(/\s+/)
+    .filter((word) => word.length >= 5 && /\p{L}/u.test(word) && /\d/.test(word) && !/^\d+(?:[.,]\d+)?(?:gb|tb|mb|mm|cm|hz|mah|w|tum|")$/i.test(word));
+  const longest = words.sort((a, b) => b.length - a.length)[0];
+  return longest && longest !== query.trim() ? longest : null;
+}
 
 function rating(score: number | null | undefined, count: number | null | undefined): Rating | null {
   if (typeof score !== "number" || !count || count <= 0) return null;
@@ -110,7 +130,10 @@ function toHit(product: GqlProduct, card?: Card): ProductHit {
     category: product.category?.name ?? card?.categoryName ?? null,
     image: product.media?.first || null,
     url: absolute(product.pathName, `${SITE}/produkt.php?p=${product.id}`),
-    lowest_price: card ? (card.lowestNewPrice ?? card.lowestUsedPrice ?? null) : (summary?.regular ?? summary?.alternative ?? null),
+    // searchV3 cards and priceSummary keep new and used apart: regular/lowestNewPrice is new only,
+    // alternative/lowestUsedPrice the cheapest used or refurbished offer.
+    lowest_price: (card ? card.lowestNewPrice : summary?.regular) ?? null,
+    lowest_price_secondhand: (card ? card.lowestUsedPrice : summary?.alternative) ?? null,
     offer_count: card?.storeCount ?? summary?.count ?? null,
     rating: rating(product.userReviewSummary?.rating, product.userReviewSummary?.count),
     gtin: gtins(product),
@@ -119,7 +142,7 @@ function toHit(product: GqlProduct, card?: Card): ProductHit {
 
 function toOffer(row: OfferRow, productUrl: string): Offer | null {
   const price = row.price?.amount;
-  if (typeof price !== "number") return null;
+  if (typeof price !== "number" || row.price?.currency !== "SEK") return null;
   const cheapest = row.shipping?.cheapest;
   const shipping = typeof cheapest?.price?.amount === "number" ? cheapest.price.amount : null;
   const stock = row.stockStatus ? STOCK[row.stockStatus] : undefined;
@@ -140,7 +163,10 @@ function toOffer(row: OfferRow, productUrl: string): Offer | null {
     total: shipping === null ? null : price + shipping,
     in_stock: stock?.in_stock ?? null,
     stock_text: stockText || null,
-    condition: (row.condition && CONDITIONS[row.condition]) || null,
+    // Used/Refurbished labels stand; a second-hand title ("Apple Refurbished …", "Grade A") beats New.
+    condition: (row.condition === "Used" || row.condition === "Refurbished" ? CONDITIONS[row.condition] : null) ??
+      secondhandCondition(row.name, row.shop?.name) ??
+      ((row.condition && CONDITIONS[row.condition]) || null),
     store_rating: rating(row.shopUserReviews?.score, row.shopUserReviews?.numberOfReviewsInScore),
     title: row.name || null,
     // The site's own shop link (/go-to-shop/...): handed to the user, never fetched here.
@@ -159,15 +185,24 @@ export const prisjakt: Source = {
   label: "Prisjakt",
 
   async search(query: string, opts: SearchOptions): Promise<ProductHit[]> {
-    const filters: { key: string; value: string }[] = [{ key: "query", value: query }];
-    if (opts.min_price !== undefined || opts.max_price !== undefined) {
-      filters.push({ key: "price", value: `${Math.floor(opts.min_price ?? 0)}-${Math.ceil(opts.max_price ?? 1_000_000_000)}` });
-    }
-    const data = await graphql<{ searchV3: { products: { items: Card[] } } }>(SEARCH_QUERY, { filters });
+    const find = async (text: string) => {
+      const filters: { key: string; value: string }[] = [{ key: "query", value: text }];
+      if (opts.min_price !== undefined || opts.max_price !== undefined) {
+        filters.push({ key: "price", value: `${Math.floor(opts.min_price ?? 0)}-${Math.ceil(opts.max_price ?? 1_000_000_000)}` });
+      }
+      const data = await graphql<{ searchV3?: { products?: { items?: Card[] | null } | null } | null }>(SEARCH_QUERY, { filters });
+      return data.searchV3?.products?.items ?? [];
+    };
+    let items = await find(query);
+    const code = items.length === 0 ? modelCode(query) : null;
+    if (code) items = await find(code);
+
+    // Price filters apply to the new price; a product with only used offers has none to compare.
     const inRange = (price: number | null | undefined) =>
-      typeof price !== "number" || ((opts.min_price === undefined || price >= opts.min_price) && (opts.max_price === undefined || price <= opts.max_price));
-    const cards = data.searchV3.products.items.filter(
-      (card): card is Card & { productId: number } => typeof card.productId === "number" && inRange(card.lowestNewPrice ?? card.lowestUsedPrice),
+      (opts.min_price === undefined && opts.max_price === undefined) ||
+      (typeof price === "number" && (opts.min_price === undefined || price >= opts.min_price) && (opts.max_price === undefined || price <= opts.max_price));
+    const cards = items.filter(
+      (card): card is Card & { productId: number } => Number.isSafeInteger(card?.productId) && inRange(card.lowestNewPrice),
     );
     if (cards.length === 0) return [];
 
@@ -175,22 +210,33 @@ export const prisjakt: Source = {
     const mainCategory = cards[0].categoryName;
     const ranked = [...cards.filter((card) => card.categoryName === mainCategory), ...cards.filter((card) => card.categoryName !== mainCategory)].slice(0, opts.limit);
 
-    const { products } = await graphql<{ products: (GqlProduct | null)[] }>(PRODUCTS_QUERY, { ids: ranked.map((card) => card.productId) });
-    const byId = new Map(products.filter((p): p is GqlProduct => p !== null).map((p) => [p.id, p]));
-    return ranked.map((card) => toHit(byId.get(card.productId) ?? { id: card.productId, name: card.name ?? "" }, card));
+    // A delisted id comes back null; its hit is then built from the search card alone.
+    const products = await graphql<Record<string, GqlProduct | null>>(productsQuery(ranked.map((card) => card.productId)), {}, true);
+    return ranked.map((card, i) => toHit(products[`p${i}`] ?? { id: card.productId, name: card.name ?? "" }, card));
   },
 
   async product(id: string): Promise<ProductDetail> {
     const pid = productId(id);
     const [data, rows, history] = await Promise.all([
-      graphql<{ product: GqlProduct | null }>(PRODUCT_QUERY, { id: pid }),
-      getJson(`/api/offer-list/${pid}`) as Promise<OfferRow[]>,
-      priceHistory(pid),
+      graphql<{ product?: GqlProduct | null }>(PRODUCT_QUERY, { id: pid }),
+      getJson(`/api/offer-list/${pid}`) as Promise<(OfferRow | null)[]>,
+      // History is extra: without it the offers still answer the question. A refused (429) or failed
+      // (5xx) request is tried once more, since compare fires several Prisjakt requests back to back.
+      priceHistory(pid)
+        .catch(async (error: unknown) => {
+          const status = error instanceof SourceError ? error.status : undefined;
+          if (status !== 429 && !(status !== undefined && status >= 500)) throw error;
+          const pause = Promise.withResolvers<void>();
+          setTimeout(pause.resolve, 500);
+          await pause.promise;
+          return priceHistory(pid);
+        })
+        .catch(() => null),
     ]);
     if (!data.product) throw new SourceError("Not found on Prisjakt", "prisjakt", 404);
     const hit = toHit(data.product);
     const offers = (Array.isArray(rows) ? rows : [])
-      .map((row) => toOffer(row, hit.url))
+      .map((row) => (row ? toOffer(row, hit.url) : null))
       .filter((offer): offer is Offer => offer !== null)
       .sort((a, b) => (a.total ?? a.price) - (b.total ?? b.price) || a.price - b.price);
     const stores = new Set(offers.map((offer) => offer.store_id ?? offer.store)).size;

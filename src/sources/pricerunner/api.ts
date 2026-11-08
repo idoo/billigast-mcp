@@ -57,17 +57,24 @@ export interface ApiListProduct {
   /** Popularity rank across PriceRunner; lower is more popular. */
   rank: { rank: number } | null;
   previewMerchants: { count: number } | null;
+  /** NEW, USED or REFURBISHED: condition of the offer behind lowestPrice. UNKNOWN-condition offers show as NEW. */
+  condition?: string | null;
 }
 
+// Response shapes are what the site sends today; fields read without a fallback could vanish, so
+// containers are optional here and read with `?? []`.
+
 export interface ApiSearch {
-  products: ApiListProduct[];
+  products?: ApiListProduct[] | null;
   /** Facet of matching categories, most relevant first; ids look like "cl94". */
-  categories: { id: string; name: string }[];
+  categories?: { id?: string | null; name?: string | null }[] | null;
+  /** How the query matched: STRICT, FUZZY, SEMANTIC (no text match; unrelated popular products). */
+  source?: string | null;
 }
 
 export interface ApiCategoryList {
-  products: ApiListProduct[];
-  category: { id: string; name: string } | null;
+  products?: ApiListProduct[] | null;
+  category?: { id: string; name: string } | null;
 }
 
 export interface ApiProductInitial {
@@ -92,7 +99,7 @@ export interface ApiOffer {
   shippingCost: Money | null;
   price: Money | null;
   merchantId: string;
-  labels: { attributeLabels: { filterId: string; value: string }[] } | null;
+  labels: { attributeLabels?: { filterId: string; value: string }[] | null } | null;
 }
 
 export interface ApiMerchant {
@@ -101,9 +108,16 @@ export interface ApiMerchant {
   rating: { count: number; average: string } | null;
 }
 
+export interface ApiFilterOption {
+  id: string;
+  count: number;
+  lowestPrice?: Money | null;
+}
+
 export interface ApiOffers {
-  offers: ApiOffer[];
-  merchants: Record<string, ApiMerchant>;
-  images: ApiImage[];
-  filters: { id: string; filterOptions: { id: string; count: number }[] }[];
+  offers?: ApiOffer[] | null;
+  merchants?: Record<string, ApiMerchant> | null;
+  images?: ApiImage[] | null;
+  /** Facets; af_ITEM_CONDITION's options carry the lowest price per condition regardless of the condition filter. */
+  filters?: { id: string; filterOptions?: ApiFilterOption[] | null }[] | null;
 }

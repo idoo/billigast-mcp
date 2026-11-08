@@ -22,8 +22,10 @@ export interface ProductHit {
   image: string | null;
   /** Absolute URL of the product page on the comparison site. */
   url: string;
-  /** Lowest current price as the site lists it. */
+  /** Lowest current price of a new offer (condition "new", or none given and nothing marks it second-hand). null when there is none or the site can't tell. Never a used or refurbished price. */
   lowest_price: number | null;
+  /** Lowest current used or refurbished price when the site shows one, else null. */
+  lowest_price_secondhand: number | null;
   /** Number of stores with an offer. */
   offer_count: number | null;
   /** User reviews of the product, when listed. */
@@ -109,11 +111,15 @@ export class SourceError extends Error {
 export interface SourceListing {
   id: string;
   url: string;
+  /** Lowest new price on this site (see ProductHit.lowest_price); null when it lists no new offer. */
   lowest_price: number | null;
+  /** Lowest used or refurbished price on this site, else null. */
+  lowest_price_secondhand: number | null;
   offer_count: number | null;
 }
 
-export type MatchKind = "gtin" | "name" | null;
+/** "name": the two sites' listings were tied by model, capacity, size and variant words. */
+export type MatchKind = "name" | null;
 
 export interface MergedProduct {
   /** Pass to compare: "prisjakt:123", "pricerunner:456" or "prisjakt:123+pricerunner:456". */
@@ -125,8 +131,9 @@ export interface MergedProduct {
   rating: Rating | null;
   gtin: string[];
   sources: Partial<Record<SourceId, SourceListing>>;
-  /** How the two sites' listings were tied together; null when only one site has it. */
+  /** How the two sites' listings were tied together; null when only one site has it, or when a key given to compare pairs listings that don't match. */
   match: MatchKind;
+  /** Lowest new price across the sites, and the site showing it. Used and refurbished prices never count. */
   cheapest: { price: number; source: SourceId } | null;
 }
 
@@ -144,7 +151,7 @@ export interface SearchResult {
 
 export interface MergedOffer {
   store: string;
-  /** Lowest price among the sites listing this store. */
+  /** Price of the offer this row links to: the store's cheapest buyable offer by total on either site. */
   price: number;
   shipping: number | null;
   total: number | null;
@@ -154,7 +161,7 @@ export interface MergedOffer {
   store_rating: Rating | null;
   title: string | null;
   url: string;
-  /** Sites that list this store's offer, with the price each shows. */
+  /** Sites that list this store's offer, with the price each shows; a site's sold-out price is left out when the store is buyable. */
   seen_on: Partial<Record<SourceId, number>>;
 }
 
@@ -168,7 +175,7 @@ export interface CompareResult {
   /** Cheapest used or refurbished offer, reported even when include_used is false. */
   cheapest_secondhand: MergedOffer | null;
   history: PriceHistory | null;
-  /** One sentence on where today's lowest price sits against the history, when there is one. */
+  /** One sentence on where Prisjakt's lowest new price sits against Prisjakt's history, noting when a cheaper offer is listed only on PriceRunner. */
   verdict: string | null;
   errors: SourceFailure[];
 }
