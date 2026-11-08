@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import html from "./app.html";
 
 // Hosts cache templates by URI: bump the version whenever app.html changes.
-export const WIDGET_URI = "ui://billigast/widget-v1.html";
+export const WIDGET_URI = "ui://billigast/widget-v2.html";
 
 /** Product image hosts the sources return: PriceRunner (owp.klarna.com) and Prisjakt (the other two). */
 const IMAGE_ORIGINS = ["https://owp.klarna.com", "https://pricespy-75b8.kxcdn.com", "https://media.pji.nu"];

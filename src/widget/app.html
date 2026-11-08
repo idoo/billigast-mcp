@@ -72,13 +72,16 @@ a:hover { text-decoration: underline; }
 .chip .cnt { grid-column: 2; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.25; }
 .chip .v { font-weight: 600; grid-column: 3; grid-row: 1 / span 2; }
 .chip.low .v { color: var(--ok); }
+.chip .v.used { color: var(--muted); font-weight: 600; }
+.chip .v.used .u { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: var(--warn); margin-right: 4px; }
 .go { margin-top: auto; padding-top: 6px; font-size: 12.5px; font-weight: 600; color: var(--link); }
 .go.err { color: var(--warn); }
 
 /* notices / states */
 .notice { margin: 0 0 12px; padding: 8px 11px; border-radius: 9px; font-size: 12.5px; background: var(--warn-soft); color: var(--warn); display: flex; gap: 8px; align-items: flex-start; overflow-wrap: anywhere; }
 .notice b { flex: 0 0 auto; }
-.empty { padding: 26px 10px; text-align: center; color: var(--muted); }
+.empty { padding: 26px 10px; text-align: center; color: var(--muted); overflow-wrap: anywhere; }
+.empty.err { color: var(--warn); }
 .sk { background: linear-gradient(90deg, var(--sunken) 25%, var(--border) 50%, var(--sunken) 75%); background-size: 200% 100%; animation: sh 1.2s infinite linear; border-radius: 8px; }
 @keyframes sh { to { background-position: -200% 0; } }
 .wait { display: grid; grid-template-columns: repeat(auto-fill, minmax(208px, 1fr)); gap: 10px; }
@@ -94,7 +97,7 @@ a:hover { text-decoration: underline; }
 .ph-head .info { min-width: 0; flex: 1; }
 .ph-head h1 { font-size: 17px; line-height: 1.25; margin: 0 0 3px; letter-spacing: -.01em; overflow-wrap: anywhere; }
 .ph-head .links { display: flex; gap: 6px 12px; flex-wrap: wrap; margin-top: 6px; font-size: 12.5px; }
-.ph-head .links a { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; }
+.ph-head .links > * { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; }
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; margin-bottom: 14px; }
 .tile { border: 1px solid var(--border); border-radius: 10px; padding: 9px 11px; background: var(--surface); min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .tile .k { font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
@@ -128,7 +131,7 @@ a:hover { text-decoration: underline; }
 .legend { display: flex; gap: 12px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
 .legend span { display: inline-flex; align-items: center; gap: 5px; }
 .offers { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--surface); }
-.orow { display: grid; grid-template-columns: minmax(0, 1fr) 76px 92px 74px 96px minmax(84px, 150px) 92px 64px; gap: 10px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 13px; min-width: 0; }
+.orow { display: grid; grid-template-columns: minmax(120px, 1fr) 76px 92px 74px 96px minmax(84px, 150px) 92px 64px; gap: 10px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 13px; min-width: 0; }
 .orow:last-child { border-bottom: 0; }
 .orow.hd { font-size: 11.5px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .03em; padding-top: 7px; padding-bottom: 7px; background: var(--sunken); }
 .orow.first { background: var(--accent-soft); }
@@ -143,6 +146,7 @@ a:hover { text-decoration: underline; }
 .stock.no { color: var(--muted); }
 .orow .rate { font-size: 12px; color: var(--muted); white-space: nowrap; }
 .orow .lnk { text-align: right; font-weight: 600; font-size: 12.5px; white-space: nowrap; }
+span.lnk, span.st { color: var(--muted); }
 .foot { margin-top: 8px; font-size: 12px; color: var(--muted); }
 .lbl-m { display: none; }
 
@@ -162,6 +166,12 @@ a:hover { text-decoration: underline; }
 }
 @media (min-width: 761px) {
   .orow .meta { display: contents; }
+}
+/* mid widths: drop the rating column so the store name keeps its 120 px */
+@media (min-width: 761px) and (max-width: 960px) {
+  .orow { grid-template-columns: minmax(120px, 1fr) 76px 92px 74px 96px minmax(84px, 150px) 64px; }
+  .orow .rate, .orow .hd-rate { display: none; }
+  .orow .store .n { white-space: normal; overflow-wrap: anywhere; }
 }
 @media (max-width: 460px) {
   .ph-head .ph { flex-basis: 64px; width: 64px; }
@@ -206,7 +216,11 @@ a:hover { text-decoration: underline; }
     }
     const params = m.params || {};
     switch (m.method) {
-      case "ui/notifications/tool-result": show(params.structuredContent); break;
+      case "ui/notifications/tool-result": {
+        const msg = toolError(params);
+        if (msg != null) showError(params, msg); else show(params.structuredContent);
+        break;
+      }
       case "ui/notifications/host-context-changed": applyContext(params); break;
       case "ui/resource-teardown": if (m.id != null) window.parent.postMessage({ jsonrpc: "2.0", id: m.id, result: {} }, "*"); break;
     }
@@ -221,10 +235,21 @@ a:hover { text-decoration: underline; }
 
   const canCallTools = () => !!(oa() && oa().callTool) || !!(hostCaps && hostCaps.serverTools);
 
+  /** The text of a failed tool result (isError, or no structuredContent to draw), else null. */
+  function toolError(res) {
+    if (res && !res.isError && res.structuredContent && typeof res.structuredContent === "object") return null;
+    const c = res && Array.isArray(res.content) ? res.content.find((x) => x && x.type === "text" && typeof x.text === "string") : null;
+    return c && c.text.trim() ? c.text.trim().replace(/^Error:\s*/, "") : "The tool returned no result.";
+  }
+
+  /** Resolves to structuredContent; a failed result rejects with `toolText` set to its message. */
   async function callTool(name, args) {
     const res = oa() && oa().callTool ? await oa().callTool(name, args) : await rpc("tools/call", { name, arguments: args }, 60000);
-    if (res && res.isError) throw new Error("tool error");
-    return res && (res.structuredContent || res);
+    // some hosts hand back the structured payload itself rather than a CallToolResult
+    if (res && !res.isError && !res.structuredContent && (Array.isArray(res.products) || res.product)) return res;
+    const msg = toolError(res);
+    if (msg != null) { const err = new Error("tool error"); err.toolText = msg; throw err; }
+    return res.structuredContent;
   }
 
   function openUrl(url) {
@@ -271,13 +296,13 @@ a:hover { text-decoration: underline; }
     } else ph.append(el("span", "noimg", "No image"));
     return ph;
   }
+  /** An external link, or a plain span when the URL isn't https (never a link that does nothing). */
   function link(text, url, cls) {
-    const a = el("a", cls, text);
     const u = httpsUrl(url);
-    if (u) {
-      a.href = u; a.target = "_blank"; a.rel = "noopener noreferrer";
-      a.onclick = (e) => { e.preventDefault(); e.stopPropagation(); openUrl(u); };
-    }
+    if (!u) return el("span", cls, text);
+    const a = el("a", cls, text);
+    a.href = u; a.target = "_blank"; a.rel = "noopener noreferrer";
+    a.onclick = (e) => { e.preventDefault(); e.stopPropagation(); openUrl(u); };
     return a;
   }
 
@@ -330,7 +355,10 @@ a:hover { text-decoration: underline; }
     const best = el("div", "best");
     if (p.cheapest) {
       add(best, el("span", "from", "from"), el("span", "p num", kr(p.cheapest.price)), siteBadge(p.cheapest.source, "Cheapest on " + siteLabel(p.cheapest.source)));
-    } else best.append(el("span", "p none", "No price listed"));
+    } else {
+      const usedOnly = SITE_ORDER.some((s) => p.sources && p.sources[s] && p.sources[s].lowest_price_secondhand != null);
+      best.append(el("span", "p none", usedOnly ? "No new price listed" : "No price listed"));
+    }
     cb.append(best);
 
     const chips = el("div", "chips");
@@ -339,8 +367,16 @@ a:hover { text-decoration: underline; }
       const l = p.sources[s];
       const low = p.cheapest && listed.length > 1 && p.cheapest.source === s;
       const chip = el("div", "chip" + (low ? " low" : ""));
-      const v = el("span", "v num", kr(l.lowest_price, true));
-      v.title = kr(l.lowest_price);
+      // lowest_price is new-only; a site listing only used/refurbished offers shows that price labelled, never as its lowest
+      let v;
+      if (l.lowest_price == null && l.lowest_price_secondhand != null) {
+        v = el("span", "v num used");
+        add(v, el("span", "u", "used"), document.createTextNode(kr(l.lowest_price_secondhand, true)));
+        v.title = "Lowest used/refurbished price: " + kr(l.lowest_price_secondhand);
+      } else {
+        v = el("span", "v num", kr(l.lowest_price, true));
+        v.title = kr(l.lowest_price);
+      }
       add(chip, siteBadge(s), el("span", "lbl", siteLabel(s)), v);
       if (l.offer_count != null) chip.append(el("span", "cnt", plural(l.offer_count, "store", "stores")));
       chips.append(chip);
@@ -370,6 +406,14 @@ a:hover { text-decoration: underline; }
       renderCompare(res, true);
       window.scrollTo(0, 0);
     } catch (err) {
+      if (hostData !== host) return;
+      if (err && err.toolText) {
+        searchData = back;
+        inCompare = true;
+        renderError(err.toolText, true);
+        window.scrollTo(0, 0);
+        return;
+      }
       card.removeAttribute("aria-busy");
       go.className = "go err"; go.textContent = "Couldn't load prices. Tap to retry";
     }
@@ -517,11 +561,18 @@ a:hover { text-decoration: underline; }
       cell("r num", "Price", kr(o.price)),
       cell("r num", "Shipping", o.shipping == null ? "–" : o.shipping === 0 ? "Free" : kr(o.shipping)),
       tot, st,
-      el("div", "rate", rt ? "★ " + rt.score.toFixed(1) + (rt.count ? " (" + group(rt.count) + ")" : "") : ""));
+      el("div", "rate", rt && typeof rt.score === "number" && isFinite(rt.score) ? "★ " + rt.score.toFixed(1) + (rt.count ? " (" + group(rt.count) + ")" : "") : ""));
     add(r, meta, totM);
-    const a = link("Store ↗", o.url, "lnk");
-    a.setAttribute("aria-label", "Open " + o.store);
-    r.append(a);
+    if (httpsUrl(o.url)) {
+      const a = link("Store ↗", o.url, "lnk");
+      a.setAttribute("aria-label", "Open " + o.store);
+      r.append(a);
+    } else {
+      // no https URL: say so in plain text rather than draw a link that does nothing
+      const s = el("span", "lnk", "No link");
+      s.title = "No secure link to this store";
+      r.append(s);
+    }
     return r;
   }
 
@@ -546,7 +597,7 @@ a:hover { text-decoration: underline; }
       const l = p.sources && p.sources[s];
       if (!l) continue;
       const a = link("", l.url);
-      add(a, siteBadge(s), document.createTextNode(siteLabel(s) + (l.offer_count != null ? " · " + plural(l.offer_count, "store", "stores") : "") + " ↗"));
+      add(a, siteBadge(s), document.createTextNode(siteLabel(s) + (l.offer_count != null ? " · " + plural(l.offer_count, "store", "stores") : "") + (a.tagName === "A" ? " ↗" : "")));
       links.append(a);
     }
     if (links.children.length) info.append(links);
@@ -562,7 +613,8 @@ a:hover { text-decoration: underline; }
     if (data.history) {
       const h = sparkline(data.history);
       if (data.verdict) {
-        const low = /\blowest\b/.test(data.verdict) && !/above/.test(data.verdict);
+        // green when today's price is at or below the history's lows; the sentence leads "<site>'s lowest new price, <price> today, is …"
+        const low = /\btoday, (is below|matches|is the lowest)\b/.test(data.verdict);
         h.append(el("div", "verdict" + (low ? " lo" : ""), data.verdict));
       }
       app.append(h);
@@ -585,7 +637,7 @@ a:hover { text-decoration: underline; }
       const tbl = el("div", "offers");
       tbl.setAttribute("role", "table");
       const h = el("div", "orow hd");
-      for (const [t, r] of [["Store", 0], ["Sites", 0], ["Price", 1], ["Shipping", 1], ["Total", 1], ["Stock", 0], ["Rating", 0], ["", 0]]) h.append(el("div", r ? "r" : "", t));
+      for (const [t, cls] of [["Store", ""], ["Sites", ""], ["Price", "r"], ["Shipping", "r"], ["Total", "r"], ["Stock", ""], ["Rating", "hd-rate"], ["", ""]]) h.append(el("div", cls, t));
       tbl.append(h);
       offers.forEach((o, i) => tbl.append(offerRow(o, i === 0)));
       app.append(tbl);
@@ -605,6 +657,27 @@ a:hover { text-decoration: underline; }
       app.replaceChildren(el("div", "empty", "Couldn't show the result."));
       console.error(err);
     }
+  }
+
+  /** A failed tool result delivered by the host: its message replaces the loading state. */
+  function showError(res, msg) {
+    if (hostData === res) return;
+    hostData = res;
+    searchData = null;
+    inCompare = false;
+    renderError(msg, false);
+  }
+
+  function renderError(msg, fromSearch) {
+    app.replaceChildren();
+    if (fromSearch && searchData) {
+      const b = el("button", "btn back", "← Back to results");
+      b.onclick = () => { inCompare = false; renderSearch(searchData); window.scrollTo(0, 0); };
+      app.append(b);
+    }
+    const box = el("div", "empty err", msg);
+    box.setAttribute("role", "alert");
+    app.append(head(null, null), box);
   }
 
   // ---------- boot ----------
