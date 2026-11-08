@@ -4,10 +4,14 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-11-01",
   "workers_dev": true,
-  // Account-wide cap on MCP calls (the free plan shares 100k requests/day across all Workers).
+  // Two limits: 20 calls a minute per client IP, so one client can't use up the rest, and 60 a minute
+  // overall (at most 86k a day), which keeps the load on Prisjakt and PriceRunner polite. Rejected and
+  // 404 requests still count against the account's daily Workers quota.
   "ratelimits": [
-    { "name": "LIMITER", "namespace_id": "5813", "simple": { "limit": 120, "period": 60 } }
+    { "name": "LIMITER", "namespace_id": "5813", "simple": { "limit": 60, "period": 60 } },
+    { "name": "IP_LIMITER", "namespace_id": "5814", "simple": { "limit": 20, "period": 60 } }
   ],
   // Secret (not in this file): MCP_PATH_TOKEN — `npx wrangler secret put MCP_PATH_TOKEN`; local copy in .dev.vars.
-  "observability": { "enabled": true }
+  // Invocation logs would record every request URL, and the URL carries the token.
+  "observability": { "enabled": true, "logs": { "invocation_logs": false } }
 }

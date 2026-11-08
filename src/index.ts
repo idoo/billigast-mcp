@@ -14,13 +14,18 @@ export default {
     if (request.method !== "POST") {
       return new Response("Method not allowed", { status: 405, headers: { allow: "POST" } });
     }
-    if (!(await env.LIMITER.limit({ key: "mcp" })).success) {
-      return Response.json(
-        { jsonrpc: "2.0", error: { code: -32000, message: "Too many requests; retry in a minute." }, id: null },
-        { status: 429 },
-      );
-    }
+    const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
+    const allowed = (await env.IP_LIMITER.limit({ key: ip })).success && (await env.LIMITER.limit({ key: "mcp" })).success;
+    if (!allowed) return rpcError(429, "Too many requests; retry in a minute.");
+    // One rate-limit slot per request, so a JSON-RPC batch would run many tool calls for the price of one.
+    // Protocol 2025-06-18 dropped batching and no client this serves sends them.
+    const body = await request.clone().text();
+    if (body.trimStart().startsWith("[")) return rpcError(400, "JSON-RPC batches aren't supported.");
 
     return handleMcp(request);
   },
 } satisfies ExportedHandler<Env>;
+
+function rpcError(status: number, message: string): Response {
+  return Response.json({ jsonrpc: "2.0", error: { code: -32000, message }, id: null }, { status });
+}
