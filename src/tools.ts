@@ -3,12 +3,14 @@ import { z } from "zod";
 import { isNew, lowestNewPrice, lowestSecondhandPrice, matchProducts, mentionsQuery, mergedProduct, mergeHits, mergeOffers, parseKey, SOURCE_IDS, verdict } from "./merge.js";
 import { pricerunner } from "./sources/pricerunner.js";
 import { prisjakt } from "./sources/prisjakt.js";
+import { LANGUAGE_ERROR, NON_LATIN_LETTER, normalizeTyreSizes, stripIntentWords } from "./query.js";
 import type { CompareResult, MatchKind, MergedOffer, ProductDetail, ProductHit, SearchOptions, SearchResult, Source, SourceFailure, SourceId } from "./types.js";
 import { WIDGET_TOOL_META } from "./widget/index.js";
 
 export const INSTRUCTIONS = `Finds a product cheaper by checking Prisjakt and PriceRunner, Sweden's two price comparison sites, at once. Flow: search → compare with a product's key for every store's price; compare also takes a Prisjakt/PriceRunner product URL or a plain product name directly (a name must carry the product's model numbers, else compare reports not found rather than guess). Prices are SEK incl. VAT; shipping only where the site reports it. The same store listed on both sites is merged into one row. Prisjakt adds price history. Links go via the comparison sites. Read-only.
 search merges both sites' hits into one product when they are the same model (model, capacity, size and variant words agree; colours may be merged when one site lists none); sources shows each site's lowest new price, lowest used/refurbished price and offer count, cheapest the lower new price. Used and refurbished prices never count as a lowest or cheapest price. Variants such as 128 vs 256 GB or Pro vs non-Pro stay separate products.
 compare returns new offers only unless include_used (cheapest_secondhand is reported regardless), sold-out offers last; each row's price, shipping, total and url belong to one offer, seen_on shows each site's price. cheapest and cheapest_secondhand skip sold-out offers (their prices are often stale) unless nothing else is listed, cheapest_in_stock is reported in stock. Also Prisjakt's price history and a verdict comparing Prisjakt's lowest new price with it, noting a cheaper offer listed only on PriceRunner. A key or URL from one site gets its counterpart on the other looked up by name; errors lists a site that failed while the other still answered, or a key whose two listings don't look like the same product (match is then null).
+Query rules for search (and plain names given to compare): Swedish or English only, category words from other languages translated into Swedish (робот-пылесос → robotdammsugare, стиральная машина → tvättmaskin); brand + model + the spec that matters (128gb, 55 tum, 205/55 r16), colours in Swedish; no intent words (billigast, cheapest, köpa, pris, bästa, deal, rea, begagnad, ny); price limits in min_price/max_price, never in the query; one product or category per query.
 Always give the user each offer's url. Keep at most 3 calls in parallel.`;
 
 const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true };
@@ -34,19 +36,43 @@ function result(run: () => Promise<object>) {
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-async function search(query: string, opts: SearchOptions, sources: readonly SourceId[]): Promise<SearchResult> {
+const EMPTY_HINT =
+  "Nothing found. Search again with Swedish product words (robotdammsugare, tvättmaskin, hörlurar), brand + model (roborock s8, bosch serie 6) or fewer words; put price limits in min_price/max_price, not in the query.";
+
+/**
+ * Each site gets the query (tyre sizes spaced as the sites write them) and keeps the hits that mention it.
+ * A site with no such hit is asked once more without intent words and price phrases ("cheapest", "pris",
+ * "under 1000"): Prisjakt finds nothing unless every word is in a product.
+ */
+async function search(input: string, opts: SearchOptions, sources: readonly SourceId[]): Promise<SearchResult> {
   if (opts.min_price !== undefined && opts.max_price !== undefined && opts.min_price > opts.max_price) {
     throw new Error("min_price is above max_price.");
   }
-  const settled = await Promise.allSettled(sources.map((source) => SOURCES[source].search(query, opts)));
+  if (NON_LATIN_LETTER.test(input)) throw new Error(LANGUAGE_ERROR);
+  const query = normalizeTyreSizes(input);
+  const reduced = stripIntentWords(query);
+  let reducedFound = false;
+  const find = async (source: SourceId) => {
+    const fitting = async (text: string) => (await SOURCES[source].search(text, opts)).filter((hit) => mentionsQuery(text, hit.name, hit.category));
+    const hits = await fitting(query);
+    if (hits.length || !reduced) return hits;
+    const retried = await fitting(reduced);
+    if (retried.length) reducedFound = true;
+    return retried;
+  };
+  const settled = await Promise.allSettled(sources.map(find));
   const lists: Partial<Record<SourceId, ProductHit[]>> = {};
   const errors: SourceFailure[] = [];
   settled.forEach((outcome, i) => {
-    if (outcome.status === "fulfilled") lists[sources[i]] = outcome.value.filter((hit) => mentionsQuery(query, hit.name));
+    if (outcome.status === "fulfilled") lists[sources[i]] = outcome.value;
     else errors.push({ source: sources[i], message: message(outcome.reason) });
   });
   if (errors.length === sources.length) throw new Error(errors.map((e) => `${SOURCES[e.source].label}: ${e.message}`).join("; "));
-  return { query, products: mergeHits(lists).slice(0, opts.limit), errors };
+  const found: SearchResult = { query: input, products: mergeHits(lists).slice(0, opts.limit), errors };
+  const used = reducedFound ? reduced : query;
+  if (used && used !== input) found.used_query = used;
+  if (found.products.length === 0 && errors.length === 0) found.hint = EMPTY_HINT;
+  return found;
 }
 
 interface CompareArgs {
@@ -184,11 +210,18 @@ export function registerTools(server: McpServer) {
     {
       title: "Search Prisjakt and PriceRunner",
       description:
-        "Search Prisjakt and PriceRunner at once. Returns products with both sites' listings merged when they are the same model: key (pass to compare), name, brand, category, image, rating, each site's lowest new price, lowest used/refurbished price, offer count and url (sources), how the sites were tied (match: name, null for one site) and the site with the lowest new price (cheapest; used and refurbished prices never count). errors lists a site that failed; the other's results still come back.",
+        "Use this when the user wants to know where a product is cheapest in Sweden, to compare store prices, or what something costs in Swedish shops (Elgiganten, Power, NetOnNet, Webhallen, Inet, Komplett, CDON and others, via Prisjakt and PriceRunner). Not for second-hand classified ads (Blocket, Tradera) or prices outside Sweden. Returns products, both sites' listings merged when they are the same model: key (pass to compare), name, brand, category, image, rating, per site the lowest new and used/refurbished price, offer count and url (sources), match (name; null for one site) and cheapest (lowest new price; used never counts). used_query shows the words searched when they differ from query; hint says what to try when nothing is found; errors lists a site that failed while the other answered.",
       inputSchema: {
-        query: z.string().trim().min(1).max(200).describe("Product to look for, e.g. 'airpods pro 2', 'iphone 16 128gb', 'samsung qe55q80d'. Model names and numbers work best."),
-        min_price: z.number().min(0).optional().describe("Lowest price, SEK incl. VAT."),
-        max_price: z.number().min(0).optional().describe("Highest price, SEK incl. VAT."),
+        query: z
+          .string()
+          .trim()
+          .min(1)
+          .max(200)
+          .describe(
+            "Product or category in Swedish or English, e.g. 'robotdammsugare roborock', 'tvättmaskin bosch', 'iphone 16 128gb', 'dubbdäck 205/55 r16'. Translate category words from other languages into Swedish (наушники → hörlurar). Brand + model + the spec that matters (128gb, 55 tum, 205/55 r16); colours in Swedish (svart, vit). No intent words: billig/billigast/cheapest, köpa/buy, pris/price, bästa/best, deal/rea, begagnad/used, ny/new. Price limits go in min_price/max_price, not here. One product or category per query.",
+          ),
+        min_price: z.number().min(0).optional().describe("Lowest price, SEK incl. VAT, e.g. 500 for 'över 500 kr'."),
+        max_price: z.number().min(0).optional().describe("Highest price, SEK incl. VAT, e.g. 1000 for 'under 1000 kr'."),
         limit: z.number().int().min(1).max(20).default(8).describe("Products to return, 1-20, default 8."),
         sources: z
           .array(z.enum(["prisjakt", "pricerunner"]))
@@ -208,7 +241,7 @@ export function registerTools(server: McpServer) {
     {
       title: "Compare store prices",
       description:
-        "Every store's price for one product across Prisjakt and PriceRunner, cheapest first by total (price + shipping) when shipping is known, else price; offers the site reports sold out come last. The same store on both sites is one row: price, shipping, total, stock and url come from one offer, seen_on has each site's price. Also cheapest (new) and cheapest_secondhand (used/refurbished), both skipping sold-out offers unless nothing else is listed, cheapest_in_stock (new, reported in stock), Prisjakt's price history (lowest new price per day; 30/90-day and all-time lows) and a verdict on Prisjakt's lowest new price against that history, naming a cheaper offer listed only on PriceRunner. With only one site known the other is looked up by name; not found = one site only.",
+        "Use this when the user wants every store's price for one product, whether a price is good or a deal right now (Black Friday, rea), or its price history and lowest price in the last 30/90 days. Not for finding products: search first unless the name carries model numbers. Offers from Prisjakt and PriceRunner, cheapest first by total (price + shipping) when shipping is known, sold-out last; a store on both sites is one row (price, shipping, total, stock and url from one offer; seen_on has each site's price). Also cheapest (new), cheapest_secondhand and cheapest_in_stock, skipping sold-out offers unless nothing else is listed; Prisjakt's price history (lowest new price per day, 30/90-day and all-time lows) and a verdict on the current price against it, naming a cheaper offer listed only on PriceRunner. A site without the product's key is looked up by name.",
       inputSchema: {
         product: z
           .string()
@@ -216,7 +249,7 @@ export function registerTools(server: McpServer) {
           .min(1)
           .max(500)
           .describe(
-            "A key from search ('prisjakt:123+pricerunner:456'), a Prisjakt or PriceRunner product page URL, or a plain product name including its model numbers (the first search result carrying them is used; none = not found).",
+            "A key from search ('prisjakt:123+pricerunner:456'), a Prisjakt or PriceRunner product page URL, or a plain product name with its model numbers, e.g. 'airpods pro 3', 'samsung qe55q80d'. Names follow search's query rules: Swedish or English, brand and model in Latin letters, no intent words (billigast, pris, köpa). The first search result carrying the model numbers is used; none = not found.",
           ),
         in_stock_only: z.boolean().default(false).describe("List only offers the site reports in stock. Default false."),
         include_used: z

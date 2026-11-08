@@ -132,11 +132,13 @@ function normalize(name: string): string {
 }
 
 /**
- * Whether a listing's name fits the query (folded the same way as for matching): it must contain every
- * model-code or number word of the query, and one of its other words if it has any. PriceRunner answers
- * a query it can't match with unrelated popular products (same brand, other model); this drops them.
+ * Whether a listing fits the query (folded the same way as for matching): its name must contain every
+ * model-code or number word of the query, and its name or category one of the query's other words if it
+ * has any. PriceRunner answers a query it can't match with unrelated popular products (same brand, other
+ * model); this drops them. The category counts because names rarely state it: "kaffemaskin" finds
+ * "De'Longhi Magnifica S" in Kaffemaskiner.
  */
-export function mentionsQuery(query: string, name: string): boolean {
+export function mentionsQuery(query: string, name: string, category: string | null = null): boolean {
   const haystack = normalize(name);
   const tokens = haystack.split(/[^a-z0-9.]+/).map((token) => token.replace(/^\.+|\.+$/g, "")).filter(Boolean);
   const words = normalize(query)
@@ -146,7 +148,8 @@ export function mentionsQuery(query: string, name: string): boolean {
   const codes = words.filter((word) => /\d/.test(word));
   const plain = words.filter((word) => !/\d/.test(word));
   if (!words.length) return false;
-  return codes.every((code) => tokens.some((token) => containsCode(token, code))) && (plain.length === 0 || plain.some((word) => haystack.includes(word)));
+  const described = category ? `${haystack} ${normalize(category)}` : haystack;
+  return codes.every((code) => tokens.some((token) => containsCode(token, code))) && (plain.length === 0 || plain.some((word) => described.includes(word)));
 }
 
 /**

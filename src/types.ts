@@ -143,10 +143,18 @@ export interface SourceFailure {
 }
 
 export interface SearchResult {
+  /** The query as given. */
   query: string;
   products: MergedProduct[];
   /** Sites that failed; results from the others are still returned. */
   errors: SourceFailure[];
+  /**
+   * The words the products were found with, when they differ from query: tyre sizes spaced ("205/55 R16"),
+   * or intent words and price phrases removed after a site found nothing for query as written.
+   */
+  used_query?: string;
+  /** What to try next, set only when nothing was found and no site failed. */
+  hint?: string;
 }
 
 export interface MergedOffer {
