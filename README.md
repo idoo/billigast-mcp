@@ -16,7 +16,7 @@ In ChatGPT both show a small card view.
 
 ## Local
 
-Claude Desktop: grab the `.mcpb` from [Releases](https://github.com/idoo/billigast-mcp/releases) and double-click it.
+Claude Desktop installs the `.mcpb` from [Releases](https://github.com/idoo/billigast-mcp/releases) with a double-click.
 
 Anything else can run it in Docker:
 
@@ -24,7 +24,7 @@ Anything else can run it in Docker:
 claude mcp add billigast -- docker run -i --rm ghcr.io/idoo/billigast-mcp
 ```
 
-No Docker? Node 20 or newer works too:
+Without Docker, Node 20 or newer works too:
 
 ```sh
 npm ci && npm run build:stdio
@@ -40,7 +40,13 @@ npm ci && npx wrangler deploy
 npx wrangler secret put MCP_PATH_TOKEN    # any long random string
 ```
 
-Paste `https://<your worker>.workers.dev/mcp/<token>` as the URL. Other paths return 404. ChatGPT: Plugins, Add custom MCP server, no auth. claude.ai: Settings, Connectors.
+The URL to paste is then:
+
+```
+https://<your worker>.workers.dev/mcp/<token>
+```
+
+Anything else on that host gets a 404, so the token works as a password. In ChatGPT it goes under Plugins as a custom MCP server with no auth, in claude.ai under Settings, Connectors.
 
 ## Caveats
 
