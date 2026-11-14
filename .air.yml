@@ -1,0 +1,11 @@
+# air-ci (Ivan's Air): push to main typechecks and deploys the billigast-mcp Worker.
+push:
+  deploy:
+    light: true
+    timeout: 15
+    paths: ['.air.yml', 'src/**', 'wrangler.jsonc', 'package.json', 'package-lock.json', 'tsconfig.json', 'worker-configuration.d.ts']
+    run: |
+      set -e
+      npm ci --no-audit --no-fund
+      npm run check
+      npx wrangler deploy

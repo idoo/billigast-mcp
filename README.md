@@ -40,6 +40,8 @@ npm ci && npx wrangler deploy
 npx wrangler secret put MCP_PATH_TOKEN    # any long random string
 ```
 
+My own Worker redeploys on every push to main from my home server (air-ci, see `.air.yml`); the commands above, from a clean committed checkout, are the manual fallback.
+
 The URL to paste is then:
 
 ```
