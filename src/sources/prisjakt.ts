@@ -25,9 +25,21 @@ const SEARCH_QUERY = `query Search($filters: [SearchFilter!]!) {
   } }
 }`;
 
+/**
+ * What a search hit needs beyond its card: brand, image, rating and GTIN. Category and prices come from
+ * the card. `category` must stay out of this batch: Prisjakt resolves it with one internal call per
+ * product and refuses the request ("@prisjakt/api-client request limit exceeded") from about 13 products on.
+ */
+const ENRICH_FIELDS = `
+  id name pathName
+  brand { name }
+  media { first(width: _280) }
+  userReviewSummary { rating count }
+  variants { gtin14 }`;
+
 /** One aliased product(id) field per id: products(ids) answers null for the whole list when one id is gone. */
 function productsQuery(ids: number[]): string {
-  return `query Products { ${ids.map((id, i) => `p${i}: product(id: ${id}) { ${PRODUCT_FIELDS} }`).join(" ")} }`;
+  return `query Products { ${ids.map((id, i) => `p${i}: product(id: ${id}) { ${ENRICH_FIELDS} }`).join(" ")} }`;
 }
 const PRODUCT_QUERY = `query Product($id: Int!) { product(id: $id) { ${PRODUCT_FIELDS} } }`;
 
@@ -210,8 +222,11 @@ export const prisjakt: Source = {
     const mainCategory = cards[0].categoryName;
     const ranked = [...cards.filter((card) => card.categoryName === mainCategory), ...cards.filter((card) => card.categoryName !== mainCategory)].slice(0, opts.limit);
 
-    // A delisted id comes back null; its hit is then built from the search card alone.
-    const products = await graphql<Record<string, GqlProduct | null>>(productsQuery(ranked.map((card) => card.productId)), {}, true);
+    // Enrichment is extra: a delisted id comes back null and a refused or failed batch as nothing, and
+    // the hit is then built from the search card alone (name, category, prices) instead of failing the search.
+    const products = await graphql<Record<string, GqlProduct | null>>(productsQuery(ranked.map((card) => card.productId)), {}, true).catch(
+      (): Record<string, GqlProduct | null> => ({}),
+    );
     return ranked.map((card, i) => toHit(products[`p${i}`] ?? { id: card.productId, name: card.name ?? "" }, card));
   },
 

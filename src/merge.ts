@@ -1,5 +1,5 @@
-// Cross-site merging: ties a Prisjakt listing to its PriceRunner counterpart (matchProducts), merges
-// search lists (mergeHits) and store offers (mergeOffers), and builds the keys compare takes.
+// Cross-site merging: ties a Prisjakt listing to its PriceRunner counterpart (by GTIN ties the caller found, else
+// matchProducts), merges search lists (mergeHits) and store offers (mergeOffers), and builds the keys compare takes.
 
 import type { MatchKind, MergedOffer, MergedProduct, Offer, PriceHistory, ProductHit, SourceId, SourceListing } from "./types.js";
 
@@ -12,7 +12,8 @@ const FILLER = new Set(
   (
     "with med och and for till the of a an en ett i in inkl incl new ny nya " +
     "generation gen edition utgava version model modell series serie " +
-    "tradlosa tradlos tradlost wireless horlurar headphones earphones earbuds inear overear onear aroundear around ear " +
+    // "earbuds" is not here: Bose names two products QuietComfort Ultra and QuietComfort Ultra Earbuds.
+    "tradlosa tradlos tradlost wireless horlurar headphones earphones inear overear onear aroundear around ear " +
     "smartphone mobiltelefon telefon mobil phone tv smart led uhd hd ssd ram dual sim esim " +
     "sladdlos cordless skaftdammsugare dammsugare stickvacuum vacuum konsol console spelkonsol laptop notebook barbar dator " +
     "bluetooth hogtalare speaker gps band " +
@@ -46,8 +47,32 @@ const COLOUR: Record<string, string> = {
   ultramarine: "ultramarine", onyx: "onyx", cobalt: "cobalt", violet: "violet", lavender: "lavender", mint: "mint",
   cream: "cream", sand: "sand", navy: "navy", desert: "desert", natural: "natural", natur: "natural", naturlig: "natural", space: "space", spacegrey: "space",
   spacegray: "space", taupe: "taupe", coral: "coral", jade: "jade", amber: "amber", sage: "sage", mocha: "mocha",
-  neon: "neon", marble: "marble", iceblue: "iceblue", sky: "sky", himmelblau: "sky", skyblue: "sky",
+  neon: "neon", marble: "marble", sky: "sky", himmelblau: "sky", skyblue: "sky",
 };
+
+/**
+ * Shade words that belong to the colour after them: "Jet Black" is black, "Tidal Blue" is blue. A closed list:
+ * "Warm White" / "Cool White" are different bulbs and "X1 Carbon" is a model, so those words stay out.
+ */
+const COLOUR_MODIFIER = new Set(
+  "jet icy ice soft deep dark light pale matte mist misty cloud ink powder tidal smoky cosmic storm pearl snow phantom mystic sunset pastel".split(" "),
+);
+
+/**
+ * A colour written as one word with what precedes it: a shade (jetblack = black), another colour (blueblack =
+ * blue + black) or a variant word PriceRunner glues on (Ultrasvart = Ultra, black). Only those three kinds of
+ * prefix: paperwhite, evergreen and bluetooth are not colours.
+ */
+function gluedColour(token: string): { variant: string | null; colours: string[] } | null {
+  for (const [word, colour] of Object.entries(COLOUR)) {
+    if (token.length === word.length || !token.endsWith(word)) continue;
+    const lead = token.slice(0, -word.length);
+    if (COLOUR_MODIFIER.has(lead)) return { variant: null, colours: [colour] };
+    if (COLOUR[lead]) return { variant: null, colours: [COLOUR[lead], colour] };
+    if (VARIANT.has(lead)) return { variant: lead, colours: [colour] };
+  }
+  return null;
+}
 
 /** Case materials, compared apart from the colour: "Svart titan" is black + titanium, "Aluminium" alone has no colour. */
 const MATERIAL: Record<string, string> = { titanium: "titanium", titan: "titanium", aluminium: "aluminium", aluminum: "aluminium", steel: "steel" };
@@ -56,6 +81,8 @@ const UNIT_TOKEN = /^\d+(?:\.\d+)?(?:gb|tb|mb|in|mah|w|hz|mm|cm|l|kg)$/;
 const CAPACITY_TOKEN = /^(\d+(?:\.\d+)?)(gb|tb)$/;
 const YEAR_TOKEN = /^(?:19|20)\d\d$/;
 const CODE_TOKEN = /^[a-z]+\d[a-z0-9]*$/;
+/** De'Longhi-style codes: ECAM22.112, ECAM22.112.B. Counted as a code only with four or more digits (USB3.2, HDMI2.1 are not). */
+const DOTTED_CODE_TOKEN = /^[a-z]+\d[a-z0-9]*(?:\.[a-z0-9]+)+$/;
 /** Accessory-looking category names (Swedish): "Tillbehör för hörlurar", "Skärmskydd", "Datorväskor". */
 const ACCESSORY_CATEGORY = /tillbehor|skydd|skal|fodral|vask|kabel|laddare/;
 /** Phones: Prisjakt names their RAM and network ("12GB RAM", "5G"), PriceRunner mostly doesn't, so those are compared softly. */
@@ -68,7 +95,7 @@ interface Features {
   /** Storage and memory in GB ("8GB RAM 128GB" -> 8, 128). */
   capacity: Set<number>;
   /** Digit-bearing tokens compared only when both names have one of the kind (one site often leaves them out). */
-  soft: Record<"year" | "cores" | "net" | "res" | "code", Set<string>>;
+  soft: Record<"year" | "cores" | "net" | "res" | "code" | "series", Set<string>>;
   variant: Set<string>;
   accessory: Set<string>;
   colour: Set<string>;
@@ -101,6 +128,7 @@ function normalize(name: string): string {
     .replace(/\brymdsvart\b/g, " space black ")
     .replace(/\bokentitan\b/g, " desert titanium ")
     .replace(/\bneo\s+qled\b/g, " qled ")
+    .replace(/\bair\s+fryer\b/g, " airfryer ")
     // Cellular models: Prisjakt says 4G, PriceRunner "GPS + Cellular", tablets "Wi-Fi + Cellular".
     .replace(/\b(?:gps|wi-?fi)\s*(?:\+|plus|och|and|&)?\s*(?:cellular|lte|[45]g)\b/g, " cellular ")
     // A watch's case material is the product, "Case" and the band size are wording (Aluminium Case with Sport Band M/L).
@@ -126,8 +154,13 @@ function normalize(name: string): string {
     .replace(/\b(\d+(?:\.\d+)?)\s+(gb|tb|mb|mah|w|hz|mm|cm|kg)\b/g, " $1$2 ")
     // Hyphenated model codes and words: WH-1000XM5, Wi-Fi, in-ear.
     .replace(/([a-z0-9])-(?=[a-z0-9])/g, "$1")
-    // A word glued to a short number is the same as spaced: Buds3 = Buds 3, HERO13 = HERO 13 (short codes like V15, M3, DHP485 stay).
-    .replace(/\b([a-z]{4,})(\d{1,2})\b/g, "$1 $2");
+    // A model word and its dotted number written apart are one code: ECAM 21.117.B = ECAM21.117.B.
+    .replace(/\b([a-z]{2,5})\s+(\d{2,3}\.\d{2,3})(?!\d)/g, (whole: string, word: string, number: string) =>
+      FILLER.has(word) || VARIANT.has(word) || COLOUR[word] ? whole : `${word}${number}`,
+    )
+    // A word glued to a short number is the same as spaced: Buds3 = Buds 3, HERO13 = HERO 13 (short codes like V15, M3, DHP485
+    // and dotted codes like ECAM22.112 stay).
+    .replace(/\b([a-z]{4,})(\d{1,2})\b(?!\.\d)/g, "$1 $2");
   return s;
 }
 
@@ -168,25 +201,30 @@ function containsCode(token: string, code: string): boolean {
 }
 
 /** `brand`: the agreed brand's words, dropped from either name even when only one site states the brand. */
-function features(hit: ProductHit, brand: Set<string>, phone: boolean): Features {
-  const tokens = normalize(hit.name)
+function features(name: string, brand: Set<string>, phone: boolean): Features {
+  const tokens = normalize(name)
+    // A product-line number, as one token: "3000 Series", "5000-serien", Bosch/Siemens "Serie 6". Done here, not in
+    // normalize, so a query's "3000" still finds it. English "Series 10" (Apple Watch) is the model and stays as is.
+    .replace(/\b(\d{3,4})[\s-]*serie(?:s|n)?\b/g, " $1series ")
+    .replace(/\bserie\s+(\d)\b/g, " $1series ")
     .split(/[^a-z0-9.]+/)
     .map((token) => token.replace(/^\.+|\.+$/g, ""))
     .filter(Boolean);
   const f: Features = {
     hard: new Set(),
     capacity: new Set(),
-    soft: { year: new Set(), cores: new Set(), net: new Set(), res: new Set(), code: new Set() },
+    soft: { year: new Set(), cores: new Set(), net: new Set(), res: new Set(), code: new Set(), series: new Set() },
     variant: new Set(),
     accessory: new Set(),
     colour: new Set(),
     material: new Set(),
     words: new Set(),
   };
-  for (const token of tokens) {
+  for (const [at, token] of tokens.entries()) {
     if (/\d/.test(token)) {
       const capacity = CAPACITY_TOKEN.exec(token);
       if (capacity) f.capacity.add(Number(capacity[1]) * (capacity[2] === "tb" ? 1000 : 1));
+      else if (/^\d+series$/.test(token)) f.soft.series.add(token);
       else if (YEAR_TOKEN.test(token)) f.soft.year.add(token);
       else if (/^\d+c$/.test(token)) f.soft.cores.add(token);
       // A phone's 4G/5G is often left out on one site; on a watch or tablet it is the cellular model.
@@ -196,15 +234,24 @@ function features(hit: ProductHit, brand: Set<string>, phone: boolean): Features
         else f.hard.add(token);
       }
       else if (/^[248]k$/.test(token)) f.soft.res.add(token);
-      else if (!UNIT_TOKEN.test(token) && CODE_TOKEN.test(token) && token.length >= 5) f.soft.code.add(token);
+      else if (!UNIT_TOKEN.test(token) && (CODE_TOKEN.test(token) ? token.length >= 5 : DOTTED_CODE_TOKEN.test(token) && token.replace(/\D/g, "").length >= 4)) f.soft.code.add(token);
       else f.hard.add(token);
       continue;
     }
     if (brand.has(token) || FILLER.has(token)) continue;
+    if (COLOUR_MODIFIER.has(token)) {
+      const next = tokens.slice(at + 1).find((later) => !COLOUR_MODIFIER.has(later));
+      if (next && (COLOUR[next] || gluedColour(next))) continue;
+    }
+    const glued = COLOUR[token] ? null : gluedColour(token);
     if (token === "lte") f.variant.add("cellular");
     // Single letters name variants: Xbox Series X vs S.
     else if (VARIANT.has(token) || token.length === 1) f.variant.add(token);
     else if (COLOUR[token]) f.colour.add(COLOUR[token]);
+    else if (glued) {
+      if (glued.variant) f.variant.add(glued.variant);
+      for (const colour of glued.colours) f.colour.add(colour);
+    }
     else if (MATERIAL[token]) f.material.add(MATERIAL[token]);
     else if (ACCESSORY_WORDS.has(token)) f.accessory.add(token);
     else {
@@ -221,11 +268,14 @@ function sameSet<T>(a: Set<T>, b: Set<T>): boolean {
 }
 
 /**
- * Model codes agree when equal or one extends the other by a regional suffix of two or more characters
- * (QE65QN90D, QE65QN90DAT); a one-letter suffix often names another configuration (Makita DHP485Z = body only).
+ * Model codes agree when equal or one extends the other by a regional suffix of two to six characters
+ * (QE65QN90D, QE65QN90DAT; ECAM22.112, ECAM22.112.B). A one-letter suffix often names another configuration
+ * (Makita DHP485Z = body only), a longer one is a second product's code glued on (the washer + dryer bundle
+ * WGK264ZLSN-WQK2420LSN).
  */
 function codesAgree(a: Set<string>, b: Set<string>): boolean {
-  const same = (x: string, y: string) => x === y || (x.startsWith(y) && x.length - y.length >= 2) || (y.startsWith(x) && y.length - x.length >= 2);
+  const suffix = (long: string, short: string) => long.startsWith(short) && long.length - short.length >= 2 && long.length - short.length <= 6;
+  const same = (x: string, y: string) => x === y || suffix(x, y) || suffix(y, x);
   return [...a].every((x) => [...b].some((y) => same(x, y))) && [...b].every((y) => [...a].some((x) => same(x, y)));
 }
 
@@ -238,7 +288,8 @@ function jaccard(a: Set<string>, b: Set<string>): number {
 
 function brandsAgree(a: ProductHit, b: ProductHit): boolean {
   const [ba, bb] = [brandTokens(a.brand), brandTokens(b.brand)];
-  if (ba.length && bb.length) return ba[0] === bb[0];
+  // Stated on both sites: the first word (Sony PlayStation = Sony) or the whole brand spelt together (De'Longhi = DeLonghi).
+  if (ba.length && bb.length) return ba[0] === bb[0] || ba.join("") === bb.join("");
   // One site knows the brand: the other's name must start with it ("Eazy Case for Apple ..." is not Apple's).
   const known = ba.length ? ba : bb;
   if (!known.length) return true;
@@ -247,29 +298,44 @@ function brandsAgree(a: ProductHit, b: ProductHit): boolean {
 }
 
 const MIN_WORD_OVERLAP = 0.75;
-/** Lowest listed prices further apart than this are not the same product (the floor allows a used offer vs new). */
+/** Lowest new prices further apart than this are not the same product, even under one model code (a site may list a single dear store). */
 const MAX_PRICE_RATIO = 4;
+/**
+ * The limit when no full model code ties the names. Of 70 priced two-site rows over 48 searches 67 were within
+ * 2x; the two code-less rows above it paired different products (a mouse with its Bluetooth edition, two
+ * capsule machines of one line).
+ */
+const MAX_UNCODED_PRICE_RATIO = 2;
 
 /**
  * Whether two listings (normally one per site) are the same product: "name" when brand, model
  * numbers, capacities, sizes, variant words, colours and materials agree and the remaining words
- * mostly overlap, else null. Errs towards null.
+ * mostly overlap, else null. Errs towards null. ("gtin" is never returned here: that tie comes from
+ * the caller, see MergeOptions.ties.)
  */
 export function matchProducts(a: ProductHit, b: ProductHit): MatchKind {
+  return matchNames(a, b, false);
+}
+
+/** matchProducts; with `anyColour` the colours are not compared, which ties one site's colour listings of a product together. */
+function matchNames(a: ProductHit, b: ProductHit, anyColour: boolean): MatchKind {
   if (!brandsAgree(a, b)) return null;
   if (a.category && b.category && ACCESSORY_CATEGORY.test(fold(a.category)) !== ACCESSORY_CATEGORY.test(fold(b.category))) return null;
-  if (a.lowest_price && b.lowest_price && Math.max(a.lowest_price, b.lowest_price) / Math.min(a.lowest_price, b.lowest_price) > MAX_PRICE_RATIO) return null;
+  const priceRatio = a.lowest_price && b.lowest_price ? Math.max(a.lowest_price, b.lowest_price) / Math.min(a.lowest_price, b.lowest_price) : 1;
+  if (priceRatio > MAX_PRICE_RATIO) return null;
 
-  const brand = new Set([...brandTokens(a.brand), ...brandTokens(b.brand)]);
+  // Both spellings of each brand, so "DeLonghi" drops from one name and "De" "Longhi" from the other.
+  const brand = new Set([a.brand, b.brand].flatMap((stated) => [...brandTokens(stated), brandTokens(stated).join("")]));
   const phone = [a, b].some((hit) => (hit.category !== null && PHONE_CATEGORY.test(fold(hit.category))) || PHONE_NAME.test(fold(hit.name)));
-  const fa = features(a, brand, phone);
-  const fb = features(b, brand, phone);
+  const fa = features(a.name, brand, phone);
+  const fb = features(b.name, brand, phone);
   // Premium tiers always have noise cancelling, so one site's "ANC" doesn't split AirPods Pro 3 (AirPods 4 vs AirPods 4 ANC still split).
   const premium = (f: Features) => f.variant.has("pro") || f.variant.has("max");
   if (premium(fa) && premium(fb)) for (const f of [fa, fb]) f.variant.delete("anc");
   // The same full model code on both sides (OLED65C44LA) already fixes size and panel, so a name that also spells
   // them out ("65\" (163 cm) OLED C4") is not a different product.
   const sameCode = fa.soft.code.size > 0 && fb.soft.code.size > 0 && codesAgree(fa.soft.code, fb.soft.code);
+  if (!sameCode && priceRatio > MAX_UNCODED_PRICE_RATIO) return null;
   if (sameCode) {
     const codes = [...fa.soft.code, ...fb.soft.code];
     const inCode = (token: string) => codes.some((code) => code.includes(token));
@@ -277,6 +343,11 @@ export function matchProducts(a: ProductHit, b: ProductHit): MatchKind {
       for (const token of f.hard) if (inCode(token) || /^\d+(?:\.\d+)?cm$/.test(token)) f.hard.delete(token);
       for (const token of f.variant) if (DISPLAY_TECH.has(token) || inCode(token)) f.variant.delete(token);
     }
+  }
+  // One site writes Bosch's "Serie 6" in English, "Series 6", which reads as a bare number (Apple Watch Series 10 has to).
+  for (const [f, other] of [[fa, fb], [fb, fa]]) {
+    if (f.soft.series.size) continue;
+    for (const token of f.hard) if (other.soft.series.has(`${token}series`)) f.hard.delete(token);
   }
   if (!sameSet(fa.hard, fb.hard) || !sameSet(fa.variant, fb.variant) || !sameSet(fa.accessory, fb.accessory)) return null;
   // Storage (the largest capacity) must agree. Memory too, except on phones where only both naming it counts
@@ -289,7 +360,7 @@ export function matchProducts(a: ProductHit, b: ProductHit): MatchKind {
     if (!fa.soft[kind].size || !fb.soft[kind].size) continue;
     if (kind === "code" ? !sameCode : !sameSet(fa.soft[kind], fb.soft[kind])) return null;
   }
-  if (fa.colour.size && fb.colour.size && !sameSet(fa.colour, fb.colour)) return null;
+  if (!anyColour && fa.colour.size && fb.colour.size && !sameSet(fa.colour, fb.colour)) return null;
   if (fa.material.size && fb.material.size && !sameSet(fa.material, fb.material)) return null;
   // The same full model code on both sides settles it whatever the marketing words.
   if (sameCode) return "name";
@@ -346,36 +417,81 @@ export function mergedProduct(hits: ProductHit[], match: MatchKind): MergedProdu
   };
 }
 
+export interface MergeOptions {
+  /** The query searched for: when it names a colour, a PriceRunner listing in that colour is preferred as the counterpart. */
+  query?: string;
+  /** Listings known to be the same product by GTIN, as each site's ProductHit.id. They pair before name matching and get match "gtin". */
+  ties?: { prisjakt: string; pricerunner: string }[];
+}
+
 /**
- * Merges each site's search hits into one list: listings matchProducts ties together become one
- * product. Ordered by best position in either list; at equal position a two-site product goes first.
+ * Merges each site's search hits into one list. A Prisjakt listing pairs with one PriceRunner listing:
+ * first the GTIN ties in `options.ties` (match "gtin"), then what matchProducts ties among the rest
+ * (match "name"). PriceRunner's other colours of a paired product fold into the pair instead of
+ * getting rows: Prisjakt's listing covers every colour, so the fair PriceRunner side is its cheapest
+ * colour (or the colour the query names), and four colour rows of one phone push other models off an
+ * 8-row page. Ordered by best position in either list, counting folded listings; at equal position a
+ * two-site product goes first.
  */
-export function mergeHits(lists: Partial<Record<SourceId, ProductHit[]>>): MergedProduct[] {
+export function mergeHits(lists: Partial<Record<SourceId, ProductHit[]>>, options: MergeOptions = {}): MergedProduct[] {
   const pj = lists.prisjakt ?? [];
   const pr = lists.pricerunner ?? [];
-  const pairs: { i: number; j: number; kind: Exclude<MatchKind, null> }[] = [];
-  pj.forEach((a, i) =>
-    pr.forEach((b, j) => {
-      const kind = matchProducts(a, b);
-      if (kind) pairs.push({ i, j, kind });
-    }),
-  );
-  pairs.sort((x, y) => x.i + x.j - (y.i + y.j) || x.i - y.i);
-
   const pairOfPj = new Map<number, { j: number; kind: Exclude<MatchKind, null> }>();
   const usedPr = new Set<number>();
+  for (const tie of options.ties ?? []) {
+    const i = pj.findIndex((hit) => hit.id === tie.prisjakt);
+    const j = pr.findIndex((hit) => hit.id === tie.pricerunner);
+    if (i === -1 || j === -1 || pairOfPj.has(i) || usedPr.has(j)) continue;
+    pairOfPj.set(i, { j, kind: "gtin" });
+    usedPr.add(j);
+  }
+
+  const pairs: { i: number; j: number; kind: Exclude<MatchKind, null> }[] = [];
+  pj.forEach((a, i) => {
+    if (pairOfPj.has(i)) return;
+    pr.forEach((b, j) => {
+      if (usedPr.has(j)) return;
+      const kind = matchProducts(a, b);
+      if (kind) pairs.push({ i, j, kind });
+    });
+  });
+  pairs.sort((x, y) => x.i + x.j - (y.i + y.j) || x.i - y.i);
   for (const { i, j, kind } of pairs) {
     if (pairOfPj.has(i) || usedPr.has(j)) continue;
     pairOfPj.set(i, { j, kind });
     usedPr.add(j);
   }
 
+  // PriceRunner lists each colour of a model, Prisjakt names it once: a left-over PriceRunner listing that matches
+  // the Prisjakt side, or is the paired PriceRunner listing in another colour, joins that pair's group. The second
+  // way also needs the Prisjakt side to agree apart from colour: a PriceRunner name without the model code
+  // ("De'Longhi Magnifica Evo") would otherwise gather every coded model of the line (ECAM290.61.B, ECAM290.81.TB).
+  const group = new Map([...pairOfPj].map(([i, { j }]) => [i, [j]]));
+  pr.forEach((b, k) => {
+    if (usedPr.has(k)) return;
+    const owner = [...pairOfPj].find(([i, { j }]) => matchProducts(pj[i], b) || (matchNames(pr[j], b, true) && matchNames(pj[i], b, true)));
+    if (!owner) return;
+    group.get(owner[0])?.push(k);
+    usedPr.add(k);
+  });
+
+  const wanted = options.query ? features(options.query, new Set(), false).colour : new Set<string>();
   const rows: { rank: number; both: boolean; order: number; product: MergedProduct }[] = [];
   pj.forEach((a, i) => {
     const pair = pairOfPj.get(i);
-    // Prisjakt names a model once for all colours; PriceRunner often lists each colour.
-    const hits = pair ? [a, pr[pair.j]] : [a];
-    rows.push({ rank: pair ? Math.min(i, pair.j) : i, both: !!pair, order: rows.length, product: mergedProduct(hits, pair?.kind ?? null) });
+    if (!pair) {
+      rows.push({ rank: i, both: false, order: rows.length, product: mergedProduct([a], null) });
+      return;
+    }
+    const members = group.get(i) ?? [pair.j];
+    // The colour the query asks for when PriceRunner lists it, else the cheapest colour (the first paired on equal or unknown price).
+    const inColour = members.filter((k) => [...features(pr[k].name, new Set(), false).colour].some((colour) => wanted.has(colour)));
+    const pool = inColour.length ? inColour : members;
+    const counterpart = pool.reduce((best, k) => {
+      const [price, bestPrice] = [pr[k].lowest_price, pr[best].lowest_price];
+      return price !== null && (bestPrice === null || price < bestPrice) ? k : best;
+    });
+    rows.push({ rank: Math.min(i, ...members), both: true, order: rows.length, product: mergedProduct([a, pr[counterpart]], pair.kind) });
   });
   pr.forEach((b, j) => {
     if (!usedPr.has(j)) rows.push({ rank: j, both: false, order: rows.length, product: mergedProduct([b], null) });

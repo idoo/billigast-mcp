@@ -44,14 +44,15 @@ interface GraphQLError {
 
 /**
  * POST to /_internal/graphql; GraphQL errors become SourceError (404 when the item doesn't exist).
- * `allowMissing`: fields that hit a missing item come back null (other fields' data is kept) instead of failing the call.
+ * `partial`: whatever data came back is returned despite errors; a field that hit a missing item or was
+ * refused is null there.
  */
-export async function graphql<T>(query: string, variables: Record<string, unknown>, allowMissing = false): Promise<T> {
+export async function graphql<T>(query: string, variables: Record<string, unknown>, partial = false): Promise<T> {
   const body = (await request("/_internal/graphql", { method: "POST", body: { query, variables } })) as {
     data?: T | null;
     errors?: GraphQLError[];
   };
-  const error = body.errors?.find((e) => !(allowMissing && body.data && e.extensions?.status === 404));
+  const error = partial && body.data ? undefined : body.errors?.[0];
   if (error) {
     const status = error.extensions?.status;
     if (status === 404) fail("Not found on Prisjakt", 404);

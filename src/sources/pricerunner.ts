@@ -35,6 +35,11 @@ const OFFER_FILTERS =
   "&sortByPreset=PRICE_WITH_SHIPPING&languageCode=sv";
 /** Most offer lists fetched for one search, to keep a search within a few dozen requests. */
 const MAX_PRICED_HITS = 20;
+/**
+ * Most EAN/GTIN codes looked up per product. Prisjakt lists one code per colour of a model and each leads to
+ * another PriceRunner colour listing; the first is often unknown to PriceRunner, so a second and third get a try.
+ */
+const MAX_GTIN_LOOKUPS = 3;
 
 /** /pl/ is the price list; /pi/ (product info) and /pr/ (reviews) are tabs of the same product. */
 const PRODUCT_PATH = /^\/p[lir]\/(\d+)-(\d+)(?:\/|$)/;
@@ -165,6 +170,43 @@ async function search(query: string, opts: SearchOptions): Promise<ProductHit[]>
     .map((entry, i) => toHit(entry.product, entry.categoryName, prices[i]))
     .filter((hit) => inRange(hit.lowest_price, opts))
     .slice(0, opts.limit);
+}
+
+/**
+ * PriceRunner listings filed under any of the first MAX_GTIN_LOOKUPS codes, one search each (in parallel).
+ * search/v5 answers an EAN it knows with exactly that product as a STRICT match; anything else (no product,
+ * several, a fuzzy match, a failed request) counts as not found, so this never throws.
+ */
+export async function listingsByGtin(gtins: string[]): Promise<ApiListProduct[]> {
+  const codes = gtins.filter((code) => /^\d{8,14}$/.test(code)).slice(0, MAX_GTIN_LOOKUPS);
+  const answers = await Promise.all(codes.map((code) => getJson<ApiSearch>(`/se/api/search-edge-rest/public/search/v5/${COUNTRY}?q=${code}`).catch(() => null)));
+  const found = new Map<string, ApiListProduct>();
+  for (const answer of answers) {
+    const products = answer?.source === "STRICT" ? (answer.products ?? []) : [];
+    if (products.length === 1 && typeof products[0]?.id === "string" && !found.has(products[0].id)) found.set(products[0].id, products[0]);
+  }
+  return [...found.values()];
+}
+
+/**
+ * The PriceRunner counterpart of a listing known by its EAN/GTIN codes (a Prisjakt hit's gtin): of the colour
+ * listings found, the cheapest whose lowest price is a new offer, priced like a search hit; null when
+ * PriceRunner knows none of the codes, or when `limits` are given and its new price is outside them (as
+ * for a search hit). Costs up to MAX_GTIN_LOOKUPS + 1 = 4 requests.
+ */
+export async function findByGtin(gtins: string[], limits?: SearchOptions): Promise<ProductHit | null> {
+  // A colour sold only refurbished is the cheapest listing but has no new price to show, so those go last;
+  // unpriced listings last within each half.
+  const [best] = (await listingsByGtin(gtins))
+    .map((product) => ({
+      product,
+      secondhand: product.condition === "USED" || product.condition === "REFURBISHED",
+      price: money(product.lowestPrice) ?? Number.MAX_VALUE,
+    }))
+    .sort((a, b) => Number(a.secondhand) - Number(b.secondhand) || a.price - b.price);
+  if (!best) return null;
+  const hit = toHit(best.product, best.product.category?.name ?? null, await conditionPrices(best.product));
+  return limits && !inRange(hit.lowest_price, limits) ? null : hit;
 }
 
 const STOCK_TEXT: Record<string, string> = {

@@ -9,7 +9,7 @@ Read-only. No accounts or API keys.
 
 ## Tools
 
-- `search` finds a product on both sites. It won't lump a 128 GB phone in with the 256 GB one, or Pro with Pro Max.
+- `search` finds a product on both sites and ties the two listings together by EAN when Prisjakt has one, otherwise by the model words. It won't lump a 128 GB phone in with the 256 GB one, or Pro with Pro Max. PriceRunner keeps a page per colour; those fold into one row with the cheapest colour.
 - `compare` takes a search key, a Prisjakt or PriceRunner link or just a name, and lists every store. It tells you how far today's price is from the 90-day low too.
 
 In ChatGPT both show a small card view.

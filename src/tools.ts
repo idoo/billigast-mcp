@@ -1,15 +1,15 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { isNew, lowestNewPrice, lowestSecondhandPrice, matchProducts, mentionsQuery, mergedProduct, mergeHits, mergeOffers, parseKey, SOURCE_IDS, verdict } from "./merge.js";
-import { pricerunner } from "./sources/pricerunner.js";
+import { findByGtin, listingsByGtin, pricerunner } from "./sources/pricerunner.js";
 import { prisjakt } from "./sources/prisjakt.js";
 import { LANGUAGE_ERROR, NON_LATIN_LETTER, normalizeTyreSizes, stripIntentWords } from "./query.js";
 import type { CompareResult, MatchKind, MergedOffer, ProductDetail, ProductHit, SearchOptions, SearchResult, Source, SourceFailure, SourceId } from "./types.js";
 import { WIDGET_TOOL_META } from "./widget/index.js";
 
 export const INSTRUCTIONS = `Finds a product cheaper by checking Prisjakt and PriceRunner, Sweden's two price comparison sites, at once. Flow: search → compare with a product's key for every store's price; compare also takes a Prisjakt/PriceRunner product URL or a plain product name directly (a name must carry the product's model numbers, else compare reports not found rather than guess). Prices are SEK incl. VAT; shipping only where the site reports it. The same store listed on both sites is merged into one row. Prisjakt adds price history. Links go via the comparison sites. Read-only.
-search merges both sites' hits into one product when they are the same model (model, capacity, size and variant words agree; colours may be merged when one site lists none); sources shows each site's lowest new price, lowest used/refurbished price and offer count, cheapest the lower new price. Used and refurbished prices never count as a lowest or cheapest price. Variants such as 128 vs 256 GB or Pro vs non-Pro stay separate products.
-compare returns new offers only unless include_used (cheapest_secondhand is reported regardless), sold-out offers last; each row's price, shipping, total and url belong to one offer, seen_on shows each site's price. cheapest and cheapest_secondhand skip sold-out offers (their prices are often stale) unless nothing else is listed, cheapest_in_stock is reported in stock. Also Prisjakt's price history and a verdict comparing Prisjakt's lowest new price with it, noting a cheaper offer listed only on PriceRunner. A key or URL from one site gets its counterpart on the other looked up by name; errors lists a site that failed while the other still answered, or a key whose two listings don't look like the same product (match is then null).
+search merges both sites' hits into one product when they are the same product: tied by EAN/GTIN when Prisjakt lists one and PriceRunner knows it, else by model words (model, capacity, size and variant words agree; colours may be merged when one site lists none); match says which (gtin, name, or null for one site). PriceRunner lists each colour as its own product while Prisjakt lists the model once: a row carries PriceRunner's cheapest colour, or the colour named in the query, so name the colour when the user wants one. sources shows each site's lowest new price, lowest used/refurbished price and offer count, cheapest the lower new price. Used and refurbished prices never count as a lowest or cheapest price. Variants such as 128 vs 256 GB or Pro vs non-Pro stay separate products.
+compare returns new offers only unless include_used (cheapest_secondhand is reported regardless), sold-out offers last; each row's price, shipping, total and url belong to one offer, seen_on shows each site's price. cheapest and cheapest_secondhand skip sold-out offers (their prices are often stale) unless nothing else is listed, cheapest_in_stock is reported in stock. Also Prisjakt's price history and a verdict comparing Prisjakt's lowest new price with it, noting a cheaper offer listed only on PriceRunner. A key or URL from one site gets its counterpart on the other looked up by EAN/GTIN, else by name; errors lists a site that failed while the other still answered, or a key whose two listings don't look like the same product (match is then null).
 Query rules for search (and plain names given to compare): Swedish or English only, category words from other languages translated into Swedish (робот-пылесос → robotdammsugare, стиральная машина → tvättmaskin); brand + model + the spec that matters (128gb, 55 tum, 205/55 r16), colours in Swedish; no intent words (billigast, cheapest, köpa, pris, bästa, deal, rea, begagnad, ny); price limits in min_price/max_price, never in the query; one product or category per query.
 Always give the user each offer's url. Keep at most 3 calls in parallel.`;
 
@@ -38,6 +38,11 @@ const message = (error: unknown) => (error instanceof Error ? error.message : St
 
 const EMPTY_HINT =
   "Nothing found. Search again with Swedish product words (robotdammsugare, tvättmaskin, hörlurar), brand + model (roborock s8, bosch serie 6) or fewer words; put price limits in min_price/max_price, not in the query.";
+
+/** Prisjakt-only rows of a search page whose GTINs are looked up on PriceRunner: 3 × 4 = 12 PriceRunner requests at most. */
+const MAX_GTIN_BRIDGES = 3;
+/** Prisjakt hits per compare checked by GTIN after failing the name match: each costs 3 PriceRunner requests. */
+const MAX_GTIN_CHECKS = 2;
 
 /**
  * Each site gets the query (tyre sizes spaced as the sites write them) and keeps the hits that mention it.
@@ -68,8 +73,28 @@ async function search(input: string, opts: SearchOptions, sources: readonly Sour
     else errors.push({ source: sources[i], message: message(outcome.reason) });
   });
   if (errors.length === sources.length) throw new Error(errors.map((e) => `${SOURCES[e.source].label}: ${e.message}`).join("; "));
-  const found: SearchResult = { query: input, products: mergeHits(lists).slice(0, opts.limit), errors };
   const used = reducedFound ? reduced : query;
+  let products = mergeHits(lists, { query: used ?? query });
+  // GTIN bridge: a Prisjakt row the names didn't tie may still be on PriceRunner under one of its EANs.
+  // Only when both sites answered, so sources: ["prisjakt"] makes no PriceRunner request.
+  if (lists.prisjakt && lists.pricerunner) {
+    const known = lists.pricerunner;
+    const bridged = products
+      .slice(0, opts.limit)
+      .filter((row) => row.sources.prisjakt && !row.sources.pricerunner && row.gtin.length)
+      .slice(0, MAX_GTIN_BRIDGES);
+    const hits = await Promise.all(bridged.map((row) => findByGtin(row.gtin, opts).catch(() => null)));
+    const ties: { prisjakt: string; pricerunner: string }[] = [];
+    hits.forEach((hit, i) => {
+      const listing = bridged[i].sources.prisjakt;
+      // Two rows reaching the same PriceRunner listing: the first (higher-ranked) one keeps it.
+      if (!hit || !listing || ties.some((tie) => tie.pricerunner === hit.id)) return;
+      if (!known.some((existing) => existing.id === hit.id)) known.push(hit);
+      ties.push({ prisjakt: listing.id, pricerunner: hit.id });
+    });
+    if (ties.length) products = mergeHits(lists, { query: used ?? query, ties });
+  }
+  const found: SearchResult = { query: input, products: products.slice(0, opts.limit), errors };
   if (used && used !== input) found.used_query = used;
   if (found.products.length === 0 && errors.length === 0) found.hint = EMPTY_HINT;
   return found;
@@ -117,11 +142,16 @@ async function fetchDetails(ids: Partial<Record<SourceId, string>>, errors: Sour
   return details;
 }
 
-/** The full name, then the name cut before "med"/"with"/" - "/",", then its first five words. */
+/**
+ * The full name, then the name cut before "med"/"with"/" - "/",", then the cut name up to its last word with
+ * a digit (Garmin Forerunner 265 Black/Powder Gray → Garmin Forerunner 265: colour words split PriceRunner's
+ * listings), then its first five words.
+ */
 function counterpartQueries(name: string): string[] {
   const cut = name.split(/\s+(?:med|with|inkl\.?|för|for)\s+|\s+[-–]\s+|,/i)[0].trim();
-  const short = cut.replace(/[()]/g, " ").split(/\s+/).filter(Boolean).slice(0, 5).join(" ");
-  return [...new Set([name, cut, short])].filter((query) => query.length >= 3);
+  const words = cut.replace(/[()]/g, " ").split(/\s+/).filter(Boolean);
+  const model = words.slice(0, words.findLastIndex((word) => /\d/.test(word)) + 1).join(" ");
+  return [...new Set([name, cut, model, words.slice(0, 5).join(" ")])].filter((query) => query.length >= 3);
 }
 
 async function compare(args: CompareArgs): Promise<CompareResult> {
@@ -132,20 +162,37 @@ async function compare(args: CompareArgs): Promise<CompareResult> {
   if (found.length === 0) throw new Error(errors.map((e) => `${SOURCES[e.source].label}: ${e.message}`).join("; "));
 
   let match = resolved;
-  // One site known: look the product up on the other by name and take its best hit that is the same product.
+  // One site known: look the product up on the other, first by GTIN (a Prisjakt listing's EANs lead to the
+  // PriceRunner listing), else by name, taking the best hit that is the same product.
   // PriceRunner's search wants close wording, so a long Prisjakt name ("... med MagSafe laddningsfodral USB-C")
   // finds nothing; shorter forms of the name are tried next.
   const other = SOURCE_IDS.find((source) => !ids[source] && !errors.some((e) => e.source === source));
   if (found.length === 1 && other) {
     const base = details[found[0]] as ProductDetail;
     try {
-      lookup: for (const query of counterpartQueries(base.name)) {
-        for (const hit of await SOURCES[other].search(query, { limit: 5 })) {
-          const kind = matchProducts(base, hit);
-          if (!kind) continue;
-          Object.assign(details, await fetchDetails({ [other]: hit.id }, errors));
-          if (details[other]) match = kind;
-          break lookup;
+      if (other === "pricerunner" && base.gtin.length) {
+        // A failed GTIN lookup only means the name lookup below gets its turn.
+        const hit = await findByGtin(base.gtin).catch(() => null);
+        if (hit) {
+          Object.assign(details, await fetchDetails({ pricerunner: hit.id }, errors));
+          if (details.pricerunner) match = "gtin";
+        }
+      }
+      if (!details[other]) {
+        let gtinChecks = 0;
+        lookup: for (const query of counterpartQueries(base.name)) {
+          for (const hit of await SOURCES[other].search(query, { limit: 5 })) {
+            let kind = matchProducts(base, hit);
+            // A Prisjakt hit whose name doesn't match may still carry the PriceRunner listing's EAN.
+            if (!kind && other === "prisjakt" && hit.gtin.length && gtinChecks < MAX_GTIN_CHECKS) {
+              gtinChecks++;
+              if ((await listingsByGtin(hit.gtin)).some((listing) => listing.id === base.id)) kind = "gtin";
+            }
+            if (!kind) continue;
+            Object.assign(details, await fetchDetails({ [other]: hit.id }, errors));
+            if (details[other]) match = kind;
+            break lookup;
+          }
         }
       }
     } catch (error) {
@@ -210,7 +257,7 @@ export function registerTools(server: McpServer) {
     {
       title: "Search Prisjakt and PriceRunner",
       description:
-        "Use this when the user wants to know where a product is cheapest in Sweden, to compare store prices, or what something costs in Swedish shops (Elgiganten, Power, NetOnNet, Webhallen, Inet, Komplett, CDON and others, via Prisjakt and PriceRunner). Not for second-hand classified ads (Blocket, Tradera) or prices outside Sweden. Returns products, both sites' listings merged when they are the same model: key (pass to compare), name, brand, category, image, rating, per site the lowest new and used/refurbished price, offer count and url (sources), match (name; null for one site) and cheapest (lowest new price; used never counts). used_query shows the words searched when they differ from query; hint says what to try when nothing is found; errors lists a site that failed while the other answered.",
+        "Use this when the user wants to know where a product is cheapest in Sweden, to compare store prices, or what something costs in Swedish shops (Elgiganten, Power, NetOnNet, Webhallen, Inet, Komplett, CDON and others, via Prisjakt and PriceRunner). Not for second-hand classified ads (Blocket, Tradera) or prices outside Sweden. Returns products, both sites' listings merged when they are the same product (by EAN/GTIN when Prisjakt lists one and PriceRunner knows it, else by model words): key (pass to compare), name, brand, category, image, rating, per site the lowest new and used/refurbished price, offer count and url (sources), match (gtin, name; null for one site) and cheapest (lowest new price; used never counts). used_query shows the words searched when they differ from query; hint says what to try when nothing is found; errors lists a site that failed while the other answered.",
       inputSchema: {
         query: z
           .string()
@@ -241,7 +288,7 @@ export function registerTools(server: McpServer) {
     {
       title: "Compare store prices",
       description:
-        "Use this when the user wants every store's price for one product, whether a price is good or a deal right now (Black Friday, rea), or its price history and lowest price in the last 30/90 days. Not for finding products: search first unless the name carries model numbers. Offers from Prisjakt and PriceRunner, cheapest first by total (price + shipping) when shipping is known, sold-out last; a store on both sites is one row (price, shipping, total, stock and url from one offer; seen_on has each site's price). Also cheapest (new), cheapest_secondhand and cheapest_in_stock, skipping sold-out offers unless nothing else is listed; Prisjakt's price history (lowest new price per day, 30/90-day and all-time lows) and a verdict on the current price against it, naming a cheaper offer listed only on PriceRunner. A site without the product's key is looked up by name.",
+        "Use this when the user wants every store's price for one product, whether a price is good or a deal right now (Black Friday, rea), or its price history and lowest price in the last 30/90 days. Not for finding products: search first unless the name carries model numbers. Offers from Prisjakt and PriceRunner, cheapest first by total (price + shipping) when shipping is known, sold-out last; a store on both sites is one row (price, shipping, total, stock and url from one offer; seen_on has each site's price). Also cheapest (new), cheapest_secondhand and cheapest_in_stock, skipping sold-out offers unless nothing else is listed; Prisjakt's price history (lowest new price per day, 30/90-day and all-time lows) and a verdict on the current price against it, naming a cheaper offer listed only on PriceRunner. A site without the product's key is looked up by EAN/GTIN, else by name; match is gtin, name or null.",
       inputSchema: {
         product: z
           .string()

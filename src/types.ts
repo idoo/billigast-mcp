@@ -30,7 +30,7 @@ export interface ProductHit {
   offer_count: number | null;
   /** User reviews of the product, when listed. */
   rating: Rating | null;
-  /** EAN/GTIN codes when the site exposes them, else []. */
+  /** EAN/GTIN codes when the site exposes them, else []. Prisjakt lists one per colour of a model; PriceRunner none, but its search finds a listing by one. */
   gtin: string[];
 }
 
@@ -118,8 +118,8 @@ export interface SourceListing {
   offer_count: number | null;
 }
 
-/** "name": the two sites' listings were tied by model, capacity, size and variant words. */
-export type MatchKind = "name" | null;
+/** "gtin": both sites file the same EAN/GTIN under these listings. "name": tied by model, capacity, size and variant words. */
+export type MatchKind = "gtin" | "name" | null;
 
 export interface MergedProduct {
   /** Pass to compare: "prisjakt:123", "pricerunner:456" or "prisjakt:123+pricerunner:456". */
