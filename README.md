@@ -1,6 +1,6 @@
 # Billigast
 
-Prisjakt and PriceRunner each know stores the other one doesn't, so this MCP server checks both. When the same product is on both sites you get one row with every Swedish store's price, cheapest first, and Prisjakt's price history underneath.
+*Billigast* is Swedish for "cheapest". Prisjakt and PriceRunner each know stores the other one doesn't, so this MCP server checks both. When the same product is on both sites you get one row with every Swedish store's price, cheapest first, and Prisjakt's price history underneath.
 
 Read-only. No accounts or API keys.
 

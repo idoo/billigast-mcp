@@ -4,8 +4,8 @@
   "name": "billigast-mcp",
   "display_name": "Billigast",
   "version": "0.0.0",
-  "description": "Find the cheapest store for a product across Prisjakt and PriceRunner from Claude. Read-only, no account needed.",
-  "long_description": "Compare Swedish prices from Claude. Search Prisjakt and PriceRunner at once, see every store's offer for a product in SEK incl. VAT and find where it is cheapest. It only reads public price data. No account or API key is needed.",
+  "description": "Billigast is Swedish for \"cheapest\": find the cheapest store for a product across Prisjakt and PriceRunner from Claude. Read-only, no account needed.",
+  "long_description": "Billigast means \"cheapest\" in Swedish, and that is what it looks for. Search Prisjakt and PriceRunner at once, see every store's offer for a product in SEK incl. VAT and find where it is cheapest. It only reads public price data. No account or API key is needed.",
   "author": {
     "name": "Ivan Verevkin",
     "url": "https://github.com/idoo"

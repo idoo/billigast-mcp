@@ -3,6 +3,7 @@ import { z } from "zod";
 import { isNew, lowestNewPrice, lowestSecondhandPrice, matchProducts, mentionsQuery, mergedProduct, mergeHits, mergeOffers, parseKey, SOURCE_IDS, verdict } from "./merge.js";
 import { findByGtin, listingsByGtin, pricerunner } from "./sources/pricerunner.js";
 import { prisjakt } from "./sources/prisjakt.js";
+import { pickForName } from "./pick.js";
 import { LANGUAGE_ERROR, NON_LATIN_LETTER, normalizeTyreSizes, stripIntentWords } from "./query.js";
 import type { CompareResult, MatchKind, MergedOffer, ProductDetail, ProductHit, SearchOptions, SearchResult, Source, SourceFailure, SourceId } from "./types.js";
 import { WIDGET_TOOL_META } from "./widget/index.js";
@@ -107,7 +108,7 @@ interface CompareArgs {
   limit: number;
 }
 
-/** Site ids for a compare argument: a key, a product page URL or a product name (searched, first result). */
+/** Site ids for a compare argument: a key, a product page URL or a product name (searched, then pickForName). */
 async function resolve(product: string, errors: SourceFailure[]): Promise<{ ids: Partial<Record<SourceId, string>>; match: MatchKind }> {
   const ids = parseKey(product);
   if (ids) return { ids, match: null };
@@ -120,15 +121,18 @@ async function resolve(product: string, errors: SourceFailure[]): Promise<{ ids:
     }
     throw new Error(`Not a Prisjakt or PriceRunner product page URL: ${text}. Use a link to one product (prisjakt.nu/produkt.php?p=… or pricerunner.se/pl/…), a key from search, or the product's name.`);
   }
+  // Five rows hold the plain model in every fixture query checked (at most row 3); a longer page only adds
+  // PriceRunner requests and lets accessories that fold more listings move up.
   const found = await search(text, { limit: 5 }, SOURCE_IDS);
   errors.push(...found.errors);
   // search keeps only listings carrying every model code and number of the name (mentionsQuery), so a
-  // name like "samsung qe55q80d" finds that TV or nothing, never some other Samsung.
-  const first = found.products[0];
-  if (!first) {
+  // name like "samsung qe55q80d" finds that TV or nothing, never some other Samsung; pickForName then
+  // prefers the plain model the name states over a variant ranked above it.
+  const picked = pickForName(text, found.products);
+  if (!picked) {
     throw new Error(`Nothing on Prisjakt or PriceRunner matches "${text}" with all its model numbers. Check the model code, try fewer or different words, or search first.`);
   }
-  return { ids: parseKey(first.key) ?? {}, match: first.match };
+  return { ids: parseKey(picked.key) ?? {}, match: picked.match };
 }
 
 async function fetchDetails(ids: Partial<Record<SourceId, string>>, errors: SourceFailure[]): Promise<Partial<Record<SourceId, ProductDetail>>> {
@@ -296,7 +300,7 @@ export function registerTools(server: McpServer) {
           .min(1)
           .max(500)
           .describe(
-            "A key from search ('prisjakt:123+pricerunner:456'), a Prisjakt or PriceRunner product page URL, or a plain product name with its model numbers, e.g. 'airpods pro 3', 'samsung qe55q80d'. Names follow search's query rules: Swedish or English, brand and model in Latin letters, no intent words (billigast, pris, köpa). The first search result carrying the model numbers is used; none = not found.",
+            "A key from search ('prisjakt:123+pricerunner:456'), a Prisjakt or PriceRunner product page URL, or a plain product name with its model numbers, e.g. 'airpods pro 3', 'samsung qe55q80d'. Names follow search's query rules: Swedish or English, brand and model in Latin letters, no intent words (billigast, pris, köpa). The top search result carrying the model numbers is used, preferring one without variant words the name lacks (Ultra, Pro, Max) and the regional model code most stores sell; none = not found.",
           ),
         in_stock_only: z.boolean().default(false).describe("List only offers the site reports in stock. Default false."),
         include_used: z

@@ -16,14 +16,14 @@ const FILLER = new Set(
     "tradlosa tradlos tradlost wireless horlurar headphones earphones inear overear onear aroundear around ear " +
     "smartphone mobiltelefon telefon mobil phone tv smart led uhd hd ssd ram dual sim esim " +
     "sladdlos cordless skaftdammsugare dammsugare stickvacuum vacuum konsol console spelkonsol laptop notebook barbar dator " +
-    "bluetooth hogtalare speaker gps band " +
+    "bluetooth hogtalare speaker gps band mouse mus " +
     "oc cpu gpu core ai standard disc chassis echassis chip unified memory storage"
   ).split(" "),
 );
 
 /** Words that tell product variants apart: both names must carry the same set. "bundle" also stands for combo, kit-like paket and kraftpaket. */
 const VARIANT = new Set(
-  "pro max plus ultra mini lite slim digital fe se xl fold flip oled qled usbc lightning anc wifi cellular lte air neo edge bundle creator".split(" "),
+  "pro max plus ultra mini lite slim digital fe se xl fold flip oled qled usbc lightning anc wifi cellular lte air neo edge bundle creator btedition".split(" "),
 );
 /** Display-technology words a TV name may add next to its full model code (LG 65" OLED C4 (OLED65C44LA)). */
 const DISPLAY_TECH = new Set(["oled", "qled"]);
@@ -47,7 +47,7 @@ const COLOUR: Record<string, string> = {
   ultramarine: "ultramarine", onyx: "onyx", cobalt: "cobalt", violet: "violet", lavender: "lavender", mint: "mint",
   cream: "cream", sand: "sand", navy: "navy", desert: "desert", natural: "natural", natur: "natural", naturlig: "natural", space: "space", spacegrey: "space",
   spacegray: "space", taupe: "taupe", coral: "coral", jade: "jade", amber: "amber", sage: "sage", mocha: "mocha",
-  neon: "neon", marble: "marble", sky: "sky", himmelblau: "sky", skyblue: "sky",
+  neon: "neon", marble: "marble", sky: "sky", himmelblau: "sky", skyblue: "sky", whitestone: "white",
 };
 
 /**
@@ -57,6 +57,13 @@ const COLOUR: Record<string, string> = {
 const COLOUR_MODIFIER = new Set(
   "jet icy ice soft deep dark light pale matte mist misty cloud ink powder tidal smoky cosmic storm pearl snow phantom mystic sunset pastel".split(" "),
 );
+
+/**
+ * Words that can stand next to a colour but name another product, so they are never taken as part of a colour
+ * name: Hue "White Ambiance" and "White and Color" are other bulbs than "White", "Warm White" another than "Cool
+ * White", and an Apple Watch "Sport Loop" another band than "Sport Band".
+ */
+const NOT_SHADE = new Set("ambiance ambience color colour farg warm cool daylight loop solo milanese ii iii iv".split(" "));
 
 /**
  * A colour written as one word with what precedes it: a shade (jetblack = black), another colour (blueblack =
@@ -101,6 +108,8 @@ interface Features {
   colour: Set<string>;
   material: Set<string>;
   words: Set<string>;
+  /** Words of `words` that may belong to a marketing colour name ("Silver Shadow"), see the end of features(). */
+  shade: Set<string>;
 }
 
 function fold(text: string): string {
@@ -129,6 +138,9 @@ function normalize(name: string): string {
     .replace(/\bokentitan\b/g, " desert titanium ")
     .replace(/\bneo\s+qled\b/g, " qled ")
     .replace(/\bair\s+fryer\b/g, " airfryer ")
+    // Logitech's "Bluetooth Edition" (MX Master 3S, MX Keys) ships without the USB receiver: another product than the
+    // plain model. Plain "Bluetooth" stays filler (speakers, headphones).
+    .replace(/\bbluetooth\s+edition\b/g, " btedition ")
     // Cellular models: Prisjakt says 4G, PriceRunner "GPS + Cellular", tablets "Wi-Fi + Cellular".
     .replace(/\b(?:gps|wi-?fi)\s*(?:\+|plus|och|and|&)?\s*(?:cellular|lte|[45]g)\b/g, " cellular ")
     // A watch's case material is the product, "Case" and the band size are wording (Aluminium Case with Sport Band M/L).
@@ -202,14 +214,24 @@ function containsCode(token: string, code: string): boolean {
 
 /** `brand`: the agreed brand's words, dropped from either name even when only one site states the brand. */
 function features(name: string, brand: Set<string>, phone: boolean): Features {
-  const tokens = normalize(name)
+  const text = normalize(name)
     // A product-line number, as one token: "3000 Series", "5000-serien", Bosch/Siemens "Serie 6". Done here, not in
     // normalize, so a query's "3000" still finds it. English "Series 10" (Apple Watch) is the model and stays as is.
     .replace(/\b(\d{3,4})[\s-]*serie(?:s|n)?\b/g, " $1series ")
-    .replace(/\bserie\s+(\d)\b/g, " $1series ")
-    .split(/[^a-z0-9.]+/)
-    .map((token) => token.replace(/^\.+|\.+$/g, ""))
-    .filter(Boolean);
+    .replace(/\bserie\s+(\d)\b/g, " $1series ");
+  const tokens: string[] = [];
+  /** What separates each token from the one before it: a space, " - ", "/". */
+  const gaps: string[] = [];
+  let end = 0;
+  for (const match of text.matchAll(/[a-z0-9.]+/g)) {
+    const token = match[0].replace(/^\.+|\.+$/g, "");
+    if (!token) continue;
+    gaps.push(text.slice(end, match.index));
+    end = match.index + match[0].length;
+    tokens.push(token);
+  }
+  /** Per token: a colour word (shade words leading a colour included), an unclassified word, or anything else. */
+  const kinds: ("colour" | "word" | "other")[] = tokens.map(() => "other");
   const f: Features = {
     hard: new Set(),
     capacity: new Set(),
@@ -219,6 +241,7 @@ function features(name: string, brand: Set<string>, phone: boolean): Features {
     colour: new Set(),
     material: new Set(),
     words: new Set(),
+    shade: new Set(),
   };
   for (const [at, token] of tokens.entries()) {
     if (/\d/.test(token)) {
@@ -241,23 +264,51 @@ function features(name: string, brand: Set<string>, phone: boolean): Features {
     if (brand.has(token) || FILLER.has(token)) continue;
     if (COLOUR_MODIFIER.has(token)) {
       const next = tokens.slice(at + 1).find((later) => !COLOUR_MODIFIER.has(later));
-      if (next && (COLOUR[next] || gluedColour(next))) continue;
+      if (next && (COLOUR[next] || gluedColour(next))) {
+        kinds[at] = "colour";
+        continue;
+      }
     }
     const glued = COLOUR[token] ? null : gluedColour(token);
     if (token === "lte") f.variant.add("cellular");
     // Single letters name variants: Xbox Series X vs S.
     else if (VARIANT.has(token) || token.length === 1) f.variant.add(token);
-    else if (COLOUR[token]) f.colour.add(COLOUR[token]);
+    else if (COLOUR[token]) {
+      f.colour.add(COLOUR[token]);
+      kinds[at] = "colour";
+    }
     else if (glued) {
       if (glued.variant) f.variant.add(glued.variant);
       for (const colour of glued.colours) f.colour.add(colour);
+      kinds[at] = "colour";
     }
     else if (MATERIAL[token]) f.material.add(MATERIAL[token]);
     else if (ACCESSORY_WORDS.has(token)) f.accessory.add(token);
     else {
       const stem = ACCESSORY_STEMS.find((s) => token.includes(s));
       if (stem) f.accessory.add(stem);
-      else f.words.add(token);
+      else {
+        f.words.add(token);
+        kinds[at] = "word";
+      }
+    }
+  }
+  // PriceRunner names a colour the way the maker markets it: "Silver Shadow", "Black Eclipse", "Whitestone/Tidal
+  // Blue", "Aqua/Black". Unknown words right after a colour word (up to two) or joined to one by "/" are kept as
+  // possible parts of the colour name; matchNames ignores them when the other name lacks them. A word before a
+  // colour is not: it names the product as often as the shade ("Earbuds White Smoke", "Era 100 SL Svart", "Tray
+  // Black", "Tomorrowland Black Edition"). A digit, filler, variant, accessory or material word ends the run.
+  const touching = (at: number) => kinds[at] === "word" && !NOT_SHADE.has(tokens[at]);
+  for (const [at, kind] of kinds.entries()) {
+    if (kind !== "colour") continue;
+    if (at > 0 && touching(at - 1) && /^\s*\/\s*$/.test(gaps[at])) f.shade.add(tokens[at - 1]);
+    for (let next = at + 1; next <= at + 2 && touching(next); next++) {
+      if (gaps[next].includes("/")) {
+        if (next === at + 1) f.shade.add(tokens[next]);
+        break;
+      }
+      if (!/^\s*$/.test(gaps[next])) break;
+      f.shade.add(tokens[next]);
     }
   }
   return f;
@@ -317,6 +368,20 @@ export function matchProducts(a: ProductHit, b: ProductHit): MatchKind {
   return matchNames(a, b, false);
 }
 
+/**
+ * Variant words (Ultra, Pro, Plus, FE, a single letter...) in a listing's name that the query doesn't have.
+ * A plain name given to compare ("Galaxy S25 256GB") must not settle on the S25 Ultra while a plain S25 is listed.
+ */
+export function extraVariants(query: string, name: string, brand: string | null = null): string[] {
+  const stated = new Set(brandTokens(brand));
+  const phone = PHONE_NAME.test(fold(name));
+  const asked = features(query, stated, phone).variant;
+  const found = features(name, stated, phone).variant;
+  // Premium tiers always have noise cancelling (as in matchNames), so "ANC" on a Pro or Max is nothing extra.
+  if (found.has("pro") || found.has("max")) found.delete("anc");
+  return [...found].filter((word) => !asked.has(word));
+}
+
 /** matchProducts; with `anyColour` the colours are not compared, which ties one site's colour listings of a product together. */
 function matchNames(a: ProductHit, b: ProductHit, anyColour: boolean): MatchKind {
   if (!brandsAgree(a, b)) return null;
@@ -366,8 +431,10 @@ function matchNames(a: ProductHit, b: ProductHit, anyColour: boolean): MatchKind
   if (sameCode) return "name";
   // Something concrete must tie them: a shared model number/capacity, or identical wording.
   const shared = fa.capacity.size > 0 || [...fa.hard, ...fa.soft.code].some((t) => fb.hard.has(t) || fb.soft.code.has(t));
-  const overlap = jaccard(fa.words, fb.words);
-  if (!shared && (overlap < 1 || fa.words.size === 0)) return null;
+  // A word that only one name has and that touches its colour is part of the colour name (Galaxy S25 "Silver Shadow").
+  const [wa, wb] = [[fa, fb], [fb, fa]].map(([f, other]) => new Set([...f.words].filter((word) => !f.shade.has(word) || other.words.has(word))));
+  const overlap = jaccard(wa, wb);
+  if (!shared && (overlap < 1 || wa.size === 0)) return null;
   return overlap >= MIN_WORD_OVERLAP ? "name" : null;
 }
 
